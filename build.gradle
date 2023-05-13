@@ -1,0 +1,28 @@
+plugins {
+    id 'java'
+}
+
+group 'org.example'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    maven { url 'https://mvn.topobyte.de' }
+    maven { url 'https://mvn.slimjars.com' }
+}
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src']
+        }
+    }
+}
+dependencies {
+    implementation 'junit:junit:4.13.1'
+    implementation 'de.topobyte:osm4j-core:0.1.0'
+    implementation 'de.topobyte:osm4j-utils:0.1.2'
+    implementation 'de.topobyte:osm4j-pbf:0.1.1'
+    implementation 'de.topobyte:osm4j-xml:0.1.2'
+    implementation 'de.topobyte:osm4j-tbo:0.1.0'
+    implementation 'de.topobyte:osm4j-geometry:0.1.0'
+}
