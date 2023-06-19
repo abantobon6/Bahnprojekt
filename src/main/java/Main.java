@@ -106,11 +106,17 @@ public class Main {
                 dbSwitches.add(dbNode);
         }
 
-        for(OSMNode osmSwitch : osmSwitches) {
-            for(DBNode dbSwitch : dbSwitches) {
-                if(Objects.equals(osmSwitch.tags.get("ref"), dbSwitch.name1)) {
-                    fixpoints.add(new Fixpoint(osmSwitch.myOSMNodeId, osmSwitch.osmId, dbSwitch.myDBNodeId, dbSwitch.sectionId, dbSwitch.elementId));
-                    System.out.println(osmSwitch.myOSMNodeId + " " + dbSwitch.myDBNodeId);
+        for(OSMWay way : osmWays) {
+            if(!way.tags.containsKey("ref"))
+                continue;
+
+            int wayRef = Integer.getInteger(way.tags.get("ref"));
+
+            for(long nodeId : way.nodesId) {
+                for (OSMNode osmNode_switch : osmSwitches) {
+                    if(osmNode_switch.osmId == nodeId) {
+
+                    }
                 }
             }
         }

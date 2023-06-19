@@ -15,6 +15,7 @@ public class OSMWay {
         this.tags = tags;
     }
     public TLongList nodesOSMId;
+    public List<OSMNode> nodes;
     public List<Long> nodesId;
     public long osmId;
     public long myId;
