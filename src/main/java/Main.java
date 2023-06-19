@@ -17,10 +17,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class Main {
 
@@ -28,6 +25,8 @@ public class Main {
     private static List<DBNode> dbNodes = new ArrayList<>();
     private static List<OSMWay> osmWays = new ArrayList<>();
     private static List<DBWay> dbWays = new ArrayList<>();
+    private static List<Fixpoint> fixpoints = new ArrayList<>();
+    private static List<OSMNode> resultNodes = new ArrayList<>();
 
     public static void main(String[] args) {
         try {
@@ -39,6 +38,9 @@ public class Main {
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
+
+        findFixpoints();
+        System.out.println(fixpoints.size());
     }
 
     private static void readDB() {
@@ -89,4 +91,29 @@ public class Main {
         }
         return map;
     }
+
+    private static void findFixpoints() {
+        List<OSMNode> osmSwitches = new ArrayList<>();
+        List<DBNode> dbSwitches = new ArrayList<>();
+
+        for(OSMNode osmNode : osmNodes) {
+            if(osmNode.tags.containsValue("switch") && osmNode.tags.containsKey("ref"))
+                osmSwitches.add(osmNode);
+        }
+
+        for(DBNode dbNode : dbNodes) {
+            if(Objects.equals(dbNode.type, "simple_switch"))
+                dbSwitches.add(dbNode);
+        }
+
+        for(OSMNode osmSwitch : osmSwitches) {
+            for(DBNode dbSwitch : dbSwitches) {
+                if(Objects.equals(osmSwitch.tags.get("ref"), dbSwitch.name1)) {
+                    fixpoints.add(new Fixpoint(osmSwitch.myOSMNodeId, osmSwitch.osmId, dbSwitch.myDBNodeId, dbSwitch.sectionId, dbSwitch.elementId));
+                    System.out.println(osmSwitch.myOSMNodeId + " " + dbSwitch.myDBNodeId);
+                }
+            }
+        }
+    }
+
 }

@@ -4,9 +4,9 @@ import java.util.Map;
 
 public class DBNode {
 
-    public DBNode(long myID, long sectionId, long elementId, long km,String type, String ds100, String stationName, String name1, String name2) {
+    public DBNode(long myDBNodeId, long sectionId, long elementId, long km,String type, String ds100, String stationName, String name1, String name2) {
         this.sectionId = sectionId;
-        this.myId = myID;
+        this.myDBNodeId = myDBNodeId;
         this. elementId = elementId;
         this.km = km;
         this.type = type;
@@ -16,7 +16,7 @@ public class DBNode {
         this.name2 = name2;
     }
 
-    public long myId;
+    public long myDBNodeId;
     public long sectionId;
     public long elementId;
     public long km;
