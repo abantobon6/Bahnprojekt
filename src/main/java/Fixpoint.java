@@ -1,16 +1,13 @@
 package main.java;
 
+import main.java.DB.DBNode;
+import main.java.OSM.OSMNode;
+
 public class Fixpoint {
-    public Fixpoint(long myOSMNodeId, long osmId, long myDBNodeId, long sectionId, long elementId) {
-        this.myOSMNodeId = myOSMNodeId;
-        this.osmId = osmId;
-        this.myDBNodeId = myDBNodeId;
-        this.sectionId = sectionId;
-        this.elementId = elementId;
+    public Fixpoint(OSMNode osmNode, DBNode dbNode) {
+        this.osmNode = osmNode;
+        this.dbNode = dbNode;
     }
-    public long myOSMNodeId;
-    public long osmId;
-    public long myDBNodeId;
-    public long sectionId;
-    public long elementId;
+    public OSMNode osmNode;
+    public DBNode dbNode;
 }

@@ -30,22 +30,22 @@ public class Main {
 
     public static void main(String[] args) {
         try {
-            System.out.println("Starting DB...");
+            System.out.println("Starting OSM...");
             readOSM();
-            System.out.println("Finished DB. Starting OSM...");
+            System.out.println("Finished OSM. Starting DB...");
             readDB();
             System.out.println("Finished DB.");
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
-
+        System.out.println("Starting search for fixpoints...");
         findFixpoints();
-        System.out.println(fixpoints.size());
+        System.out.println("Found " + fixpoints.size() + " fixpoints.");
     }
 
     private static void readDB() {
         try {
-            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("C:/Users/Anton/IdeaProjects/Bahnprojekt/data/DB"));
+            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("data/DB"));
             for(Path filePath : ds) {
                 BufferedReader br = null;
                 String line = "";
@@ -54,7 +54,7 @@ public class Main {
                 br.readLine();
                 while((line = br.readLine()) != null) {
                     String[] tags = line.split(";", -1);
-                    dbNodes.add(new DBNode(ctr, Long.parseLong(tags[0]), Long.parseLong(tags[1]), Long.parseLong(tags[2]), tags[3], tags[4], tags[5], tags[6], tags[7]));
+                    dbNodes.add(new DBNode(Integer.parseInt(filePath.toString().substring(8, 12)), ctr, Long.parseLong(tags[0]), Long.parseLong(tags[1]), Long.parseLong(tags[2]), tags[3], tags[4], tags[5], tags[6], tags[7]));
                     ctr++;
                 }
             }
@@ -69,16 +69,26 @@ public class Main {
         Way tmpWay;
         long ctr = 0;
 
-        OsmIterator iter = new OsmXmlIterator("C:/Users/Anton/IdeaProjects/Bahnprojekt/data/germany_railway.osm", false);
+        OsmIterator iter = new OsmXmlIterator("data/germany_railway.osm", false);
         for (EntityContainer container : iter) {
             if (container.getType() == EntityType.Node) {
                 tmpNode = (Node) container.getEntity();
                 osmNodes.add(new OSMNode(convertListToMap(tmpNode.getTags()), tmpNode.getId(), ctr, tmpNode.getLongitude(), tmpNode.getLongitude()));
+                System.out.println("Progress: Node " + ctr);
             }
 
             if (container.getType() == EntityType.Way) {
                 tmpWay = (Way) container.getEntity();
-                osmWays.add(new OSMWay(tmpWay.getNodes(), null, tmpWay.getId(), ctr, convertListToMap(tmpWay.getTags())));
+                List<OSMNode> nodes = new ArrayList<>();
+                for (long nodeId_way : tmpWay.getNodes().toArray()) {
+                    for (OSMNode node : osmNodes) {
+                        //füge passende Nodes zu Liste hinzu
+                        if (node.osmId == nodeId_way)
+                            nodes.add(node);
+                    }
+                }
+                osmWays.add(new OSMWay(tmpWay.getNodes(), nodes, tmpWay.getId(), ctr, convertListToMap(tmpWay.getTags())));
+                System.out.println("Progress: Way " + (ctr - osmNodes.size()));
             }
             ctr++;
         }
@@ -97,29 +107,40 @@ public class Main {
         List<DBNode> dbSwitches = new ArrayList<>();
 
         for(OSMNode osmNode : osmNodes) {
-            if(osmNode.tags.containsValue("switch") && osmNode.tags.containsKey("ref"))
+            if(osmNode.tags.containsValue("switch") && osmNode.tags.containsKey("ref")) {
+                //System.out.println("OSMSwitch: " + osmNode.osmId);
                 osmSwitches.add(osmNode);
+            }
         }
 
         for(DBNode dbNode : dbNodes) {
-            if(Objects.equals(dbNode.type, "simple_switch"))
+            if(Objects.equals(dbNode.type, "simple_switch")) {
+                //System.out.println("DBSwitch: " + dbNode.elementId);
                 dbSwitches.add(dbNode);
+            }
         }
-
+        System.out.println("B");
         for(OSMWay way : osmWays) {
             if(!way.tags.containsKey("ref"))
                 continue;
 
-            int wayRef = Integer.getInteger(way.tags.get("ref"));
+            String wayRef = way.tags.get("ref");
+            System.out.println(wayRef);
 
-            for(long nodeId : way.nodesId) {
-                for (OSMNode osmNode_switch : osmSwitches) {
-                    if(osmNode_switch.osmId == nodeId) {
-
-                    }
+            for(OSMNode osmNode : way.nodes) {
+                if(osmSwitches.contains(osmNode)) {
+                    fixpoints.add(new Fixpoint(osmNode, getDBSwitch(dbSwitches, wayRef, osmNode.tags.get("ref"))));
                 }
             }
         }
+    }
+
+    private static DBNode getDBSwitch(List<DBNode> dbSwitches, String wayRef, String ref) {
+        for(DBNode dbSwitch : dbSwitches) {
+            if(dbSwitch.streckenId == Integer.getInteger(wayRef) && Objects.equals(dbSwitch.name1, ref))
+                return dbSwitch;
+        }
+        return null;
     }
 
 }
