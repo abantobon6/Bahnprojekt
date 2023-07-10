@@ -10,4 +10,8 @@ public class Fixpoint {
     }
     public OSMNode osmNode;
     public DBNode dbNode;
+
+    public String toString() {
+        return "OSMNode: " + osmNode.toString() + "; DBNode: " + dbNode.toString();
+    }
 }

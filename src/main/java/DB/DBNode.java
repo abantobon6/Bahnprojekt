@@ -27,4 +27,12 @@ public class DBNode {
     public String stationName;
     public String name1;
     public String name2;
+
+    public String toString() {
+        return "[" + String.valueOf(streckenId) + "; " + String.valueOf(myDBNodeId) + "; " +
+                String.valueOf(sectionId) + "; " + String.valueOf(elementId) + "; " +
+                String.valueOf(km) + "; " + type + "; " +
+                ds100 + "; " + stationName + "; " +
+                name1 + "; " + name2 + "]";
+    }
 }
