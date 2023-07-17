@@ -41,8 +41,17 @@ public class Main {
         System.out.println("Starting search for fixpoints...");
         findFixpoints();
         System.out.println("Found " + fixpoints.size() + " fixpoints.");
+        System.out.println("Start mapping nodes...");
         mapNodes();
-        writeNodesToFile();
+        System.out.println("Finished mapping nodes...");
+        System.out.println("Mapped " + resultNodes.size() + " nodes.");
+        System.out.println("Start writing nodes to file...");
+        try {
+            writeNodesToFile();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        System.out.println("Finished!");
     }
 
     private static void readDB() {
@@ -71,7 +80,6 @@ public class Main {
                     ctr++;
                 }
                 dbWays.put(streckenId, new DBWay(streckenId, sections));
-                System.out.println(dbWays.get(streckenId).streckenId);
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -89,7 +97,6 @@ public class Main {
             if (container.getType() == EntityType.Node) {
                 tmpNode = (Node) container.getEntity();
                 osmNodes.put(tmpNode.getId(), new OSMNode(convertListToMap(tmpNode.getTags()), tmpNode.getId(), ctr, tmpNode.getLongitude(), tmpNode.getLatitude()));
-                //System.out.println("Progress: Node " + ctr);
             }
 
             if (container.getType() == EntityType.Way) {
@@ -102,12 +109,13 @@ public class Main {
                 //füge Ways hinzu
                 OSMWay newOSMWay = new OSMWay(tmpWay.getNodes(), nodes, tmpWay.getId(), ctr, convertListToMap(tmpWay.getTags()));
                 for (OSMNode node : newOSMWay.nodes) {
+                    if (node == null)
+                        continue;
                     OSMNode nodeToUpdate = osmNodes.get(node.osmId);
                     nodeToUpdate.ways.add(newOSMWay);
                     osmNodes.put(node.osmId, nodeToUpdate);
                 }
                 osmWays.put(tmpWay.getId(), newOSMWay);
-                //System.out.println("Progress: Way " + (ctr - osmNodes.size()));
             }
             ctr++;
         }
@@ -147,10 +155,6 @@ public class Main {
                                 (Objects.equals(dbSwitch.name1, osmNode.tags.get("ref")))) {
                             Fixpoint fix = new Fixpoint(osmNode, getDBSwitch(dbSwitches, wayRef, osmNode.tags.get("ref")));
 
-                            //System.out.println("OSMNode: " + fix.osmNode.toString());
-                            //System.out.println("DBNode: " + fix.dbNode.toString());
-                            //System.out.println();
-
                             fixpoints.add(fix);
                         }
                     }
@@ -168,89 +172,170 @@ public class Main {
     }
 
     private static void mapNodes() {
+        int counter = 0;
         for (DBWay dbWay : dbWays.values()) {
+            System.out.println(counter + "/" + dbWays.values().size());
+            counter++;
             for (DBSection dbSection : dbWay.dbSections.values()) {
                 for (DBNode dbNode : dbSection.nodes) {
-                    List<DBNode> dbNodesToScan = dbSection.nodes;
-                    Fixpoint fix;
-                    if ((fix = getFixpoint(dbNode)) != null) {
-                        long kmUp = dbNode.km;
-                        long kmDown = dbNode.km;
-                        int indexUp = dbNodesToScan.indexOf(dbNode);
-                        int indexDown = dbNodesToScan.indexOf(dbNode);
-                        DBNode currentDBNodeUp = dbNode;
-                        DBNode currentDBNodeDown = dbNode;
-                        List<DBNode> dbWayUp = new ArrayList<>();
-                        List<DBNode> dbWayDown = new ArrayList<>();
 
+                    System.out.println("StreckenId: " + dbWay.streckenId + " | SectionId: " + dbNode.sectionId + " | NodeId: " +  dbNode.elementId);
 
+                    List<DBNode> dbNodesToScan = dbSection.nodes; //section (nodes with consistent kilometre-marking)
+                    Fixpoint fix = getFixpoint(dbNode);
+                    if (fix != null) { //find first Fixpoint
+                        //set variables and direction
+                        long currentKm = dbNode.km;
+                        int firstIndex = dbSection.nodes.indexOf(dbNode);
+                        int currentIndex = firstIndex;
+                        List<DBNode> currentDBPath = new ArrayList<>();
+
+                        //set datastructure for osm-paths
                         OSMNode startOSMNode = fix.osmNode;
-                        List<List<OSMNode>> osmPaths = new ArrayList<>();
-                        List<OSMNode> firstPath = new LinkedList<>();
+                        ArrayList<ArrayList<OSMNode>> osmPaths = new ArrayList<>();
+                        ArrayList<OSMNode> firstPath = new ArrayList<>();
                         firstPath.add(startOSMNode);
                         osmPaths.add(firstPath);
 
+                        //walk DBSection
+                        while (currentIndex < dbNodesToScan.size() && currentIndex >= 0) {
+                            System.out.println("B");
 
-                        //Ways entlang gehen
-                        while (true) {
-                            if (indexUp < dbNodesToScan.size() - 1 || indexDown > 0) {
-                                if (indexUp < dbNodesToScan.size() - 1) {
-                                    //DBWay aufwährts gehen
-                                    indexUp++;
-                                    dbWayUp.add(dbNodesToScan.get(indexUp));
-                                }
-                                if (indexDown > 0) {
-                                    //DBWay abwährts gehen
-                                    indexDown--;
-                                    dbWayDown.add(dbNodesToScan.get(indexDown));
-                                }
-                                //OSMWays in alle Richtungen entlanglaufen
-                                osmPaths = expandOSMPaths(osmPaths);
-
-                                //update data for next iteration
-                                currentDBNodeUp = dbNodesToScan.get(indexUp);
-                                currentDBNodeDown = dbNodesToScan.get(indexDown);
-                                kmUp = currentDBNodeUp.km;
-                                kmDown = currentDBNodeDown.km;
-
-                                if (getFixpoint(currentDBNodeUp) != null || getFixpoint(currentDBNodeDown) != null) {
-                                    for (List<OSMNode> osmPath : osmPaths) {
-                                        for (OSMNode neighbour : osmPath.get(osmPath.size() - 1).getNeigbours()) {
-                                            if (Objects.equals(getFixpoint(currentDBNodeUp), getFixpoint(neighbour))) {
-
-                                            }
-                                            else if (Objects.equals(getFixpoint(currentDBNodeDown), getFixpoint(neighbour))) {
-
-                                            }
-                                        }
-                                    }
+                            //walk DBWay up
+                            if (firstIndex == 0) {
+                                currentDBPath.add(dbNodesToScan.get(currentIndex));
+                                currentIndex++;
+                            }
+                            //walk DBWay down
+                            else if (firstIndex == dbNodesToScan.size()-1) {
+                                currentDBPath.add(dbNodesToScan.get(currentIndex));
+                                currentIndex--;
+                            }
+                            if (currentIndex >= dbNodesToScan.size() || currentIndex < 0|| getFixpoint(dbNodesToScan.get(currentIndex)) != null)
+                                break;
+                        }
+                        //walk OSMWays (in all directions)
+                        boolean cont = true;
+                        while (cont && osmPaths.size() < 1050) {
+                            osmPaths = expandOSMPaths(osmPaths);
+                            for (List<OSMNode> osmPath : osmPaths) {
+                                if (Objects.equals(fix, getFixpoint(osmPath.get(osmPath.size() - 1)))) {
+                                    System.out.println("A");
+                                    processWays(currentDBPath, osmPath);
+                                    cont = false;
+                                    break;
                                 }
                             }
-                            break;
                         }
                     }
                 }
             }
+            System.out.println("Finished " + dbWay.streckenId);
         }
     }
 
-    private static List<List<OSMNode>> expandOSMPaths(List<List<OSMNode>> osmPaths) {
-        List<List<OSMNode>> workOSMPaths = osmPaths;
-        int indexOfLastElement = workOSMPaths.size() - 1;
-        for (List<OSMNode> path : workOSMPaths) {
-            List<OSMNode> workPath = path;
-            List<OSMNode> workPath2 = path;
-            List<OSMNode> workPath3 = path;
-            if (path.get(indexOfLastElement).getNeigbours().size() > 1) {
+    private static void processWays(List<DBNode> dbPath, List<OSMNode> osmPath) {
+        if (dbPath.size() == 0 || osmPath.size() == 0)
+            return;
+        int currentOSMIndex = 0;
+        int currentDBIndex = 0;
+        OSMNode currentOSMNode = osmPath.get(0);
+        DBNode currentDBNode = dbPath.get(0);
+        long currentKM = currentDBNode.km;
+
+        currentOSMNode.tags.put("dbElementID", String.valueOf(dbPath.get(currentDBIndex + 1).elementId));
+        resultNodes.add(currentOSMNode);
+
+        while (true) {
+            double osmDist = getDistance(currentOSMNode.lat, currentOSMNode.lon, osmPath.get(currentOSMIndex + 1).lat, osmPath.get(currentOSMIndex + 1).lon);
+            double dbDist = Math.abs(currentKM - dbPath.get(currentDBIndex + 1).km);
+            //Next node is present in both lists
+            if (Math.abs(osmDist - dbDist) < 0.010) {
+                OSMNode mappedNode = osmPath.get(currentOSMIndex + 1);
+                mappedNode.tags.put("dbElementID", String.valueOf(dbPath.get(currentDBIndex + 1).elementId));
+                resultNodes.add(mappedNode);
+                fixpoints.add(new Fixpoint(currentOSMNode, currentDBNode));
+
+                currentDBIndex++;
+                currentOSMIndex++;
+                currentDBNode = dbPath.get(currentDBIndex);
+                currentOSMNode = osmPath.get(currentOSMIndex);
+                currentKM = currentDBNode.km;
+            }
+            //Next node is only present in OSM-list
+            else if (osmDist + 0.010 < dbDist) {
+                resultNodes.add(currentOSMNode);
+
+                currentOSMIndex++;
+                currentOSMNode = osmPath.get(currentOSMIndex);
+                currentKM = currentKM + (long) osmDist;
+            }
+            //Next node is only present in DB-list
+            else {
+                Map<String, String> tags = new HashMap<>();
+                tags.put("railway", String.valueOf(dbPath.get(currentDBIndex + 1).type));
+                tags.put("dbElementID", String.valueOf(dbPath.get(currentDBIndex + 1).elementId));
+                //compute lon and lat of new result-node
+                double Bx = Math.cos(osmPath.get(currentOSMIndex+1).lat) * Math.cos(Math.abs(currentDBNode.km-currentKM));
+                double By = Math.cos(osmPath.get(currentOSMIndex+1).lat) * Math.sin(Math.abs(currentDBNode.km-currentKM));
+                double lat3 = Math.atan2(Math.sin(currentOSMNode.lat)+Math.sin(osmPath.get(currentOSMIndex+1).lat), Math.sqrt((Math.cos(currentOSMNode.lat)+Bx) * (Math.cos(currentOSMNode.lat)+Bx) + By*By));
+                double lon3 = currentOSMNode.lon + Math.atan2(By, Math.cos(currentOSMNode.lat) + Bx);
+
+                OSMNode newNode = new OSMNode(tags, -1, -1, lon3, lat3);
+                resultNodes.add(newNode);
+
+                currentKM = dbPath.get(currentDBIndex + 1).km;
+                currentOSMNode = newNode;
+                currentDBIndex++;
+                currentDBNode = dbPath.get(currentDBIndex);
+            }
+            if (currentDBIndex == dbPath.size() - 1)
+                break;
+        }
+    }
+
+    public static double getDistance(double lat1, double lon1, double lat2, double lon2) {
+        int radius = 6371;
+
+        double lat = Math.toRadians(lat2 - lat1);
+        double lon = Math.toRadians(lon2- lon1);
+
+        double a = Math.sin(lat / 2) * Math.sin(lat / 2) + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(lon / 2) * Math.sin(lon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        double d = radius * c;
+
+        return Math.abs(d);
+    }
+
+    private static ArrayList<ArrayList<OSMNode>> expandOSMPaths(ArrayList<ArrayList<OSMNode>> osmPaths) {
+        ArrayList<ArrayList<OSMNode>> workOSMPaths = (ArrayList<ArrayList<OSMNode>>)osmPaths.clone();
+        int counter = 0;
+        for (ArrayList<OSMNode> path : osmPaths) {
+            System.out.println("Path " + counter +"/"+ osmPaths.size());
+            counter++;
+            int indexOfLastElement = path.size() - 1;
+            ArrayList<OSMNode> workPath = path;
+            ArrayList<OSMNode> workPath2 = path;
+            ArrayList<OSMNode> workPath3 = path;
+            int numberOfNeighbours = path.get(indexOfLastElement).getNeigbours().size();
+            if (numberOfNeighbours > 1) {
+                System.out.println("Number of neighbours: " + numberOfNeighbours + "|" +
+                        path.get(indexOfLastElement).getNeigboursWithout(path.get(indexOfLastElement)).size());
                 workPath.add(workPath.get(indexOfLastElement).getNeigboursWithout(workPath.get(indexOfLastElement)).get(0));
                 workOSMPaths.remove(path);
                 workOSMPaths.add(workPath);
 
-                if (path.get(indexOfLastElement).getNeigbours().size() > 2) {
-                    workPath2.add(workPath2.get(indexOfLastElement).getNeigboursWithout(workPath2.get(indexOfLastElement)).get(1));
+                if (numberOfNeighbours > 2) {
+                    for (OSMNode node : path.get(indexOfLastElement).getNeigbours()) {
+                        System.out.println(node.osmId);
+                    }
+                    workPath2.add(workPath2.
+                            get(indexOfLastElement).
+                            getNeigboursWithout(workPath2.get(indexOfLastElement)).
+                            get(1));
                     workOSMPaths.add(workPath2);
 
-                    if (path.get(indexOfLastElement).getNeigbours().size() > 3) {
+                    if (numberOfNeighbours > 3) {
                         workPath2.add(workPath3.get(indexOfLastElement).getNeigboursWithout(workPath3.get(indexOfLastElement)).get(2));
                         workOSMPaths.add(workPath3);
                     }
@@ -270,8 +355,12 @@ public class Main {
         return null;
     }
 
-    private static void writeNodesToFile() {
-
+    private static void writeNodesToFile() throws IOException {
+        File resultFile = new File("mapped_nodes.osm");
+        BufferedWriter writer = new BufferedWriter(new FileWriter(resultFile, true));
+        for (OSMNode node : resultNodes) {
+            writer.write(node.toString());
+        }
     }
 
 }
