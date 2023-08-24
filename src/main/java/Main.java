@@ -42,6 +42,7 @@ public class Main {
         findFixpoints();
         System.out.println("Found " + fixpoints.size() + " fixpoints.");
         System.out.println("Start mapping nodes...");
+        /*
         mapNodes();
         System.out.println("Finished mapping nodes...");
         System.out.println("Mapped " + resultNodes.size() + " nodes.");
@@ -51,7 +52,7 @@ public class Main {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        System.out.println("Finished!");
+        System.out.println("Finished!");*/
     }
 
     private static void readDB() {
@@ -136,14 +137,25 @@ public class Main {
         for (OSMNode osmNode : osmNodes.values()) {
             if (osmNode.tags.containsValue("switch") && osmNode.tags.containsKey("ref"))
                 osmSwitches.add(osmNode);
+            else if (osmNode.tags.containsValue("level_crossing") && osmNode.tags.containsKey("ref"))
+                osmSwitches.add(osmNode);
+            else if (osmNode.tags.containsValue("signal:main") && osmNode.tags.containsKey("ref"))
+                osmSwitches.add(osmNode);
         }
 
         for (DBNode dbNode : dbNodes.values()) {
             if(Objects.equals(dbNode.type, "simple_switch"))
                 dbSwitches.add(dbNode);
+            else if(Objects.equals(dbNode.type, "level_crossing"))
+                dbSwitches.add(dbNode);
+            else if(Objects.equals(dbNode.type, "ms"))
+                dbSwitches.add(dbNode);
         }
 
+        int counter = 0;
         for (OSMWay way : osmWays.values()) {
+            System.out.println(counter + "/" + osmWays.values().size());
+            counter++;
             if(!way.tags.containsKey("ref"))
                 continue;
 
@@ -152,7 +164,8 @@ public class Main {
                 if (osmSwitches.contains(osmNode)) {
                     for (DBNode dbSwitch : dbSwitches) {
                         if (Objects.equals(String.valueOf(dbSwitch.streckenId), wayRef) &&
-                                (Objects.equals(dbSwitch.name1, osmNode.tags.get("ref")))) {
+                                (Objects.equals(osmNode.tags.get("ref"), dbSwitch.name1)
+                                        || Objects.equals(osmNode.tags.get("ref"), dbSwitch.name2))) {
                             Fixpoint fix = new Fixpoint(osmNode, getDBSwitch(dbSwitches, wayRef, osmNode.tags.get("ref")));
 
                             fixpoints.add(fix);
@@ -189,15 +202,9 @@ public class Main {
                         int firstIndex = dbSection.nodes.indexOf(dbNode);
                         int currentIndex = firstIndex;
                         List<DBNode> currentDBPath = new ArrayList<>();
+                        Fixpoint goalNode = null;
 
-                        //set datastructure for osm-paths
-                        OSMNode startOSMNode = fix.osmNode;
-                        ArrayList<ArrayList<OSMNode>> osmPaths = new ArrayList<>();
-                        ArrayList<OSMNode> firstPath = new ArrayList<>();
-                        firstPath.add(startOSMNode);
-                        osmPaths.add(firstPath);
-
-                        //walk DBSection
+                        //walk DBSection (build DB path)
                         while (currentIndex < dbNodesToScan.size() && currentIndex >= 0) {
                             System.out.println("B");
 
@@ -211,27 +218,45 @@ public class Main {
                                 currentDBPath.add(dbNodesToScan.get(currentIndex));
                                 currentIndex--;
                             }
-                            if (currentIndex >= dbNodesToScan.size() || currentIndex < 0|| getFixpoint(dbNodesToScan.get(currentIndex)) != null)
+
+                            if (currentIndex >= dbNodesToScan.size() || currentIndex < 0 || getFixpoint(dbNodesToScan.get(currentIndex)) != null)
                                 break;
-                        }
-                        //walk OSMWays (in all directions)
-                        boolean cont = true;
-                        while (cont && osmPaths.size() < 1050) {
-                            osmPaths = expandOSMPaths(osmPaths);
-                            for (List<OSMNode> osmPath : osmPaths) {
-                                if (Objects.equals(fix, getFixpoint(osmPath.get(osmPath.size() - 1)))) {
-                                    System.out.println("A");
-                                    processWays(currentDBPath, osmPath);
-                                    cont = false;
-                                    break;
-                                }
+                            if (getFixpoint(dbNodesToScan.get(currentIndex)) != null) {
+                                goalNode = getFixpoint(dbNodesToScan.get(currentIndex));
+                                break;
                             }
                         }
+                        //build OSM paths
+                        if (goalNode == null)
+                            continue;
+                        List<OSMNode> osmPath = buildOSMPaths(fix.osmNode, goalNode.osmNode);
+
+                        processWays(currentDBPath, osmPath);
                     }
                 }
             }
             System.out.println("Finished " + dbWay.streckenId);
         }
+    }
+
+    private static List<OSMNode> buildOSMPaths(OSMNode startNode, OSMNode goalNode) {
+        //set datastructure for osm-paths
+        ArrayList<ArrayList<OSMNode>> osmPaths = new ArrayList<>();
+        ArrayList<OSMNode> firstPath = new ArrayList<>();
+        firstPath.add(startNode);
+        osmPaths.add(firstPath);
+
+        //walk OSM paths (in all directions)
+        while (osmPaths.size() < 1050) {
+            osmPaths = expandOSMPaths(osmPaths);
+            for (List<OSMNode> osmPath : osmPaths) {
+                if (getFixpoint(osmPath.get(osmPath.size()-1)) != null) {
+                    System.out.println("A");
+                    return osmPath;
+                }
+            }
+        }
+        return null;
     }
 
     private static void processWays(List<DBNode> dbPath, List<OSMNode> osmPath) {
@@ -305,6 +330,43 @@ public class Main {
         double d = radius * c;
 
         return Math.abs(d);
+    }
+
+    private static HashSet<ArrayList<OSMNode>> expandOSMPaths2(HashSet<ArrayList<OSMNode>> osmPaths) {
+        HashSet<ArrayList<OSMNode>> workOSMPaths = (HashSet<ArrayList<OSMNode>>)osmPaths.clone();
+        for (ArrayList<OSMNode> path : osmPaths) {
+            if (getFixpoint(path.get(path.size()-1)) != null)
+                continue;
+            int indexOfLastElement = path.size() - 1;
+            ArrayList<OSMNode> workPath = path;
+            ArrayList<OSMNode> workPath2 = path;
+            ArrayList<OSMNode> workPath3 = path;
+            int numberOfNeighbours = path.get(indexOfLastElement).getNeigbours().size();
+            if (numberOfNeighbours > 1) {
+                System.out.println("Number of neighbours: " + numberOfNeighbours + "|" +
+                        path.get(indexOfLastElement).getNeigboursWithout(path.get(indexOfLastElement)).size());
+                workPath.add(workPath.get(indexOfLastElement).getNeigboursWithout(workPath.get(indexOfLastElement)).get(0));
+                workOSMPaths.remove(path);
+                workOSMPaths.add(workPath);
+
+                if (numberOfNeighbours > 2) {
+                    for (OSMNode node : path.get(indexOfLastElement).getNeigbours()) {
+                        System.out.println(node.osmId);
+                    }
+                    workPath2.add(workPath2.
+                            get(indexOfLastElement).
+                            getNeigboursWithout(workPath2.get(indexOfLastElement)).
+                            get(1));
+                    workOSMPaths.add(workPath2);
+
+                    if (numberOfNeighbours > 3) {
+                        workPath2.add(workPath3.get(indexOfLastElement).getNeigboursWithout(workPath3.get(indexOfLastElement)).get(2));
+                        workOSMPaths.add(workPath3);
+                    }
+                }
+            }
+        }
+        return workOSMPaths;
     }
 
     private static ArrayList<ArrayList<OSMNode>> expandOSMPaths(ArrayList<ArrayList<OSMNode>> osmPaths) {
