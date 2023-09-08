@@ -8,11 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 public class OSMWay {
-    public OSMWay(TLongList nodesOSMId, List<OSMNode> nodes, long osmId, long myId, Map<String, String> tags) {
+    public OSMWay(TLongList nodesOSMId, List<OSMNode> nodes, long osmId, Map<String, String> tags) {
         this.nodesOSMId = nodesOSMId;
         this.nodes = nodes;
         this.osmId = osmId;
-        this.myId = myId;
         this.tags = tags;
     }
     public TLongList nodesOSMId;

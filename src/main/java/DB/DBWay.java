@@ -1,14 +1,13 @@
 package main.java.DB;
 
-import java.util.HashMap;
 import java.util.List;
 
 public class DBWay {
-    public DBWay(long streckenId, HashMap<Long, DBSection> dbSections) {
+    public DBWay(long streckenId, List<DBSection> dbSectionIds) {
         this.streckenId = streckenId;
-        this.dbSections = dbSections;
+        this.dbSectionIds = dbSectionIds;
     }
 
     public long streckenId;
-    public HashMap<Long, DBSection> dbSections;
+    public List<DBSection> dbSectionIds;
 }
