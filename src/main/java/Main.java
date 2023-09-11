@@ -37,8 +37,8 @@ public class Main {
         System.out.println("Finished OSM. Starting DB...");
         readDB();
         System.out.println("Finished DB.");
-        //printDBInfo();
-        //printOSMInfo();
+        printDBInfo();
+        printOSMInfo();
         System.out.println("Starting search for fixpoints...");
         findFixpoints();
         System.out.println("Found " + fixpoints.size() + " fixpoints.");
@@ -215,7 +215,7 @@ public class Main {
         Node tmpNode;
         Way tmpWay;
 
-        OsmIterator iter = new OsmXmlIterator("data/germany_railway.osm", false);
+        OsmIterator iter = new OsmXmlIterator("data/berlin_railway.osm", false);
         for (EntityContainer container : iter) {
             if (container.getType() == EntityType.Node) {
                 tmpNode = (Node) container.getEntity();
@@ -329,7 +329,7 @@ public class Main {
                         }
                     }
                 }
-                System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat != -1).toList().size());
+                //System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat != -1).toList().size());
             }
         }
     }
@@ -383,7 +383,7 @@ public class Main {
             DBNode dbNode = dbNodes.get(dbPath.get(i));
             DBNode nextDbNode = dbNodes.get(dbPath.get(i+1));
             String key = String.valueOf(nextDbNode.elementId).concat(nextDbNode.type).concat(nextDbNode.ds100).concat(nextDbNode.stationName).concat(nextDbNode.name1);
-            double dbNodeDist = Math.abs(dbNode.km - dbNodes.get(equalNodes.get(key).stream().filter(x -> dbNodes.get(x).sectionId == nextDbNode.sectionId).toList().get(0)).km);
+            double dbNodeDist = Math.abs(dbNode.km - dbNodes.get(equalNodes.get(key).stream().filter(x -> dbNodes.get(x).sectionId == nextDbNode.sectionId).toList().get(0)).km) / 1000.0;
 
             double osmNodeDist = 0;
             double lastOsmDist = 0;
@@ -402,6 +402,10 @@ public class Main {
             }
             //get gps-tag for dbNode
             setGpsTag(dbNode, nodeAfter, nodeBefore, (osmNodeDist - dbNodeDist) / lastOsmDist);
+            System.out.println(dbPath);
+            System.out.println("Mapped DB-Node: StreckenId: " + dbNode.streckenId + "; Typ: " + dbNode.type +
+                    "; SectionId: " + dbNode.sectionId + "; ElementId: " + dbNode.elementId
+                    + "; lat: " + dbNode.lat + "; lon: " + dbNode.lon);
         }
     }
 
