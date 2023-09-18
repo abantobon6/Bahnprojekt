@@ -445,8 +445,13 @@ public class Main {
                     nearestOSMNode = osmStartNode.osmId;
                 if (anchorNodes.get(nextDbNode.nodeId) == null
                         && (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross"))
-                        && (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing")))
+                        && (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing"))) {
                     anchorNodes.put(nextDbNode.nodeId, nearestOSMNode);
+                    nextDbNode.lat = osmNodes.get(nearestOSMNode).lat;
+                    nextDbNode.lon = osmNodes.get(nearestOSMNode).lon;
+                    dbNodes.put(nextDbNode.nodeId, nextDbNode);
+                    break;
+                }
                 continue;
             }
 
@@ -467,9 +472,14 @@ public class Main {
             }
             //if switch -> add to anchorNodes
             nearestOSMNode = (osmNodeDist - dbNodeDist < lastOsmDist - (osmNodeDist - dbNodeDist) ? nodeAfter.osmId : nodeBefore.osmId);
-            if (anchorNodes.get(nextDbNode.nodeId) == null && (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross"))) {
-                if (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing"))
-                    anchorNodes.put(nextDbNode.nodeId, nearestOSMNode);
+            if (anchorNodes.get(nextDbNode.nodeId) == null
+                    && (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross"))
+                    && (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing"))) {
+                anchorNodes.put(nextDbNode.nodeId, nearestOSMNode);
+                nextDbNode.lat = osmNodes.get(nearestOSMNode).lat;
+                nextDbNode.lon = osmNodes.get(nearestOSMNode).lon;
+                dbNodes.put(nextDbNode.nodeId, nextDbNode);
+                break;
             }
             //get gps-tag for dbNode
             if (dbNodes.get(nextDbNode.nodeId).lat == -1) {
