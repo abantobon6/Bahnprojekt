@@ -450,6 +450,11 @@ public class Main {
                     nextDbNode.lat = osmNodes.get(nearestOSMNode).lat;
                     nextDbNode.lon = osmNodes.get(nearestOSMNode).lon;
                     dbNodes.put(nextDbNode.nodeId, nextDbNode);
+                    try {
+                        writer.write(nextDbNode.toString() + "\n");
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                     break;
                 }
                 continue;
@@ -479,6 +484,11 @@ public class Main {
                 nextDbNode.lat = osmNodes.get(nearestOSMNode).lat;
                 nextDbNode.lon = osmNodes.get(nearestOSMNode).lon;
                 dbNodes.put(nextDbNode.nodeId, nextDbNode);
+                try {
+                    writer.write(nextDbNode.toString() + "\n");
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
                 break;
             }
             //get gps-tag for dbNode
