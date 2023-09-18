@@ -32,8 +32,6 @@ public class DBNode {
 
     public List<Long> neighbours = new ArrayList<>();
 
-    public boolean mapped = false;
-
     public double lat = -1;
     public double lon = -1;
 
@@ -42,7 +40,7 @@ public class DBNode {
                 sectionId + "; " + elementId + "; " +
                 km + "; " + type + "; " +
                 ds100 + "; " + stationName + "; " +
-                name1 + "; " + name2 + "; " + lat + "; " + lon + "; " + neighbours.size() + "; " +
+                name1 + "; " + name2 + "; " + lat + "; " + lon + "; " +
                 "; Neighbours: " + listToString(neighbours) + "]";
     }
 
@@ -86,8 +84,5 @@ public class DBNode {
     }
     public void setNeighbours(List<Long> neighbours) {
         this.neighbours = neighbours;
-    }
-    public void setMapped(boolean mapped) {
-        this.mapped = mapped;
     }
 }

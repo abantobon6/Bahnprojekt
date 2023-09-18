@@ -19,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class Main {
 
@@ -27,9 +26,19 @@ public class Main {
     private static HashMap<Long,DBNode> dbNodes = new HashMap<>();
     private static HashMap<Long,OSMWay> osmWays = new HashMap<>();
     private static HashMap<Integer, DBWay> dbWays = new HashMap<>();
-    private static HashMap<String, List<Long>> equalNodes = new HashMap<>();
-    private static HashMap<Long, Long> fixpoints = new HashMap<>(); //dbNodes mapped to osmNodes
-    private static Map<Long, DBNode> workDbNodes = new HashMap<>();
+    private static HashMap<Long, List<Long>> equalNodes = new HashMap<>();
+    private static HashMap<Long, Long> anchorNodes = new HashMap<>(); //dbNodes mapped to osmNodes
+    private static ArrayList<DBNode> mappedNodes = new ArrayList<>();
+    private static File mappedNodesFile = new File("data/mappedNodes.txt");
+    private static FileWriter writer;
+
+    static {
+        try {
+            writer = new FileWriter(mappedNodesFile);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     public static void main(String[] args) throws FileNotFoundException {
         System.out.println("Starting OSM...");
@@ -39,9 +48,9 @@ public class Main {
         System.out.println("Finished DB.");
         printDBInfo();
         printOSMInfo();
-        System.out.println("Starting search for fixpoints...");
-        findFixpoints();
-        System.out.println("Found " + fixpoints.size() + " fixpoints.");
+        System.out.println("Starting search for anchorNodes" + "...");
+        findAnchorNodes();
+        System.out.println("Found " + anchorNodes.size() + " anchorNodes" + ".");
         System.out.println("Start mapping nodes...");
         mapNodes();
         System.out.println("Finished!");
@@ -66,7 +75,6 @@ public class Main {
         int ctrBo = 0;
 
         for (DBNode dbNode : dbNodes.values()) {
-
             switch (dbNode.neighbours.size()) {
                 case 0 : ctr0++; break;
                 case 1 : ctr1++; break;
@@ -76,7 +84,7 @@ public class Main {
             }
             switch (dbNode.type) {
                 case "simple_switch" : ctrSw++; break;
-                case "level_crossing" : ctrLc++; break;
+                case "cross" : ctrLc++; break;
                 case "bumper" : ctrB++; break;
                 case "border" : ctrBo++; break;
             }
@@ -145,7 +153,6 @@ public class Main {
                     String[] tags = line.split(";", -1);
                     DBNode node = new DBNode(Long.parseLong(tags[0].concat(tags[1])), streckenId, Long.parseLong(tags[0]), Long.parseLong(tags[1]), Long.parseLong(tags[2]), tags[3], tags[4], tags[5], tags[6], tags[7]);
                     dbNodes.put(node.nodeId, node);
-                    workDbNodes.put(node.nodeId, node);
 
                     if (sections.stream().noneMatch(x -> x.sectionId == node.sectionId)) {
                         sections.add(newSection);
@@ -169,32 +176,28 @@ public class Main {
         //set neighbours
         for (DBWay dbWay : dbWays.values()) {
             for (DBSection dbSection : dbWay.dbSectionIds.stream().filter(x -> x.nodes.size() > 0).toList()) {
-                DBNode prev = dbNodes.get(dbSection.nodes.get(0));
-                for (int i = 1; i < dbSection.nodes.size(); i++) {
-                    DBNode dbNode = dbNodes.get(dbSection.nodes.get(i));
+                DBNode prev;
+                DBNode dbNode;
+                for (int i = 0; i < dbSection.nodes.size()-1; i++) {
+                    prev = dbNodes.get(dbSection.nodes.get(i));
+                    dbNode = dbNodes.get(dbSection.nodes.get(i+1));
 
                     prev.neighbours.add(dbNode.nodeId);
                     dbNode.neighbours.add((prev.nodeId));
-                    dbNodes.put(dbSection.nodes.get(i-1), prev);
-                    dbNodes.put(dbSection.nodes.get(i), dbNode);
-                    workDbNodes.put(dbSection.nodes.get(i-1), prev);
-                    workDbNodes.put(dbSection.nodes.get(i), dbNode);
-
-                    prev = dbNode;
+                    dbNodes.put(prev.nodeId, prev);
+                    dbNodes.put(dbNode.nodeId, dbNode);
                 }
             }
         }
-
         for (DBNode dbNode : dbNodes.values()) {
-            String key = String.valueOf(dbNode.elementId).concat(dbNode.type).concat(dbNode.ds100).concat(dbNode.stationName).concat(dbNode.name1);
-            if (equalNodes.containsKey(key)) {
-                List<Long> listToUpdate = equalNodes.get(key);
+            if (equalNodes.containsKey(dbNode.elementId)) {
+                List<Long> listToUpdate = equalNodes.get(dbNode.elementId);
                 listToUpdate.add(dbNode.nodeId);
-                equalNodes.put(key, listToUpdate);
+                equalNodes.put(dbNode.elementId, listToUpdate);
             } else {
                 List<Long> newList = new ArrayList<>();
                 newList.add(dbNode.nodeId);
-                equalNodes.put(key, newList);
+                equalNodes.put(dbNode.elementId, newList);
             }
         }
         for (List<Long> nodes : equalNodes.values()) {
@@ -206,7 +209,6 @@ public class Main {
                 DBNode dbNodeToUpdate = dbNodes.get(nodeId);
                 dbNodeToUpdate.setNeighbours(neighbours);
                 dbNodes.put(nodeId, dbNodeToUpdate);
-                workDbNodes.put(nodeId, dbNodeToUpdate);
             }
         }
     }
@@ -215,7 +217,7 @@ public class Main {
         Node tmpNode;
         Way tmpWay;
 
-        OsmIterator iter = new OsmXmlIterator("data/berlin_railway.osm", false);
+        OsmIterator iter = new OsmXmlIterator("data/germany_railway.osm", false);
         for (EntityContainer container : iter) {
             if (container.getType() == EntityType.Node) {
                 tmpNode = (Node) container.getEntity();
@@ -249,7 +251,9 @@ public class Main {
         }
     }
 
-    private static void findFixpoints() {
+    private static void findAnchorNodes() {
+        HashMap<Long, Long> unambiguousNodesDB = new HashMap<>();
+        HashMap<Long, Long> unambiguousNodesOSM = new HashMap<>();
         List<DBNode> dbSwitches = dbNodes.values().stream().filter(x -> Objects.equals(x.type, "simple_switch")
                                                                     || Objects.equals(x.type, "cross")
                                                                     || Objects.equals(x.type, "ms")).toList();
@@ -263,14 +267,21 @@ public class Main {
                     for (DBNode dbSwitch : dbSwitches) {
                         if (Objects.equals(String.valueOf(dbSwitch.streckenId), wayRef) &&
                                 (Objects.equals(osmNode.tags.get("ref"), dbSwitch.name1) || Objects.equals(osmNode.tags.get("ref"), dbSwitch.name2))) {
-                            DBNode tempDbNode = workDbNodes.get(dbSwitch.nodeId);
-                            tempDbNode.mapped = true;
-                            workDbNodes.put(dbSwitch.nodeId, tempDbNode);
+                            if (unambiguousNodesDB.get(dbSwitch.nodeId) != null || unambiguousNodesOSM.get(osmNode.osmId) != null) {
+                                anchorNodes.remove(dbSwitch.nodeId);
+                                dbSwitch.lat = -1;
+                                dbSwitch.lon = -1;
+                                dbNodes.put(dbSwitch.nodeId, dbSwitch);
+                                continue;
+                            }
+                            unambiguousNodesDB.put(dbSwitch.nodeId, dbSwitch.nodeId);
+                            unambiguousNodesOSM.put(osmNode.osmId, osmNode.osmId);
 
-                            fixpoints.put(dbSwitch.nodeId, osmNode.osmId);
+                            anchorNodes.put(dbSwitch.nodeId, osmNode.osmId);
                             dbSwitch.lat = osmNode.lat;
                             dbSwitch.lon = osmNode.lon;
                             dbNodes.put(dbSwitch.nodeId, dbSwitch);
+                            mappedNodes.add(dbSwitch);
                         }
                     }
                 }
@@ -287,10 +298,13 @@ public class Main {
     }
 
     public static void mapNodes() {
+        while (!anchorNodes.isEmpty()) {
+            HashMap<Long, Long> copyOfAnchorNodes = (HashMap<Long, Long>) anchorNodes.clone();
+            for (Long idToRemove : copyOfAnchorNodes.keySet())
+                if (dbNodes.get(idToRemove).neighbours.stream().allMatch(x -> dbNodes.get(x).lat != -1)) anchorNodes.remove(idToRemove);
 
-        while (true) {
-            DBNode startNode = dbNodes.get(fixpoints.keySet().stream().toList().get(new Random().nextInt(fixpoints.size())));
-            ArrayList<Long> nodesToCheck = new ArrayList<>(startNode.neighbours);
+            DBNode startNode = dbNodes.get(anchorNodes.keySet().stream().toList().get(new Random().nextInt(anchorNodes.size())));
+            ArrayList<Long> nodesToCheck = new ArrayList<>(startNode.neighbours.stream().filter(x -> dbNodes.get(x).lat == -1).toList());
             ArrayList<Long> updatedNodesToCheck = nodesToCheck;
 
             HashMap<Long, Long> dbNeighbourNet = new HashMap<>();
@@ -300,119 +314,182 @@ public class Main {
             }
 
             boolean cont = true;
-
             while (cont) {
                 nodesToCheck = (ArrayList<Long>) updatedNodesToCheck.clone();
                 updatedNodesToCheck = new ArrayList<>();
                 for (Long neighbourId : nodesToCheck) {
-
-                    if (fixpoints.get(neighbourId) != null && dbNodes.get(neighbourId).elementId != startNode.elementId) {
-                        System.out.println("A: " + startNode.nodeId + ", B: " + neighbourId);
+                    if (anchorNodes.get(neighbourId) != null && dbNodes.get(neighbourId).elementId != startNode.elementId) {
                         //get dbPath
-                        List<Long> dbPath = new ArrayList<>();
+                        LinkedList<Long> dbPath = new LinkedList<>();
+                        int dbPathLength = 0;
+
                         dbPath.add(neighbourId);
                         Long tempId = neighbourId;
-                        while (tempId != null && tempId != startNode.nodeId) {
+                        while (tempId != startNode.nodeId) {
+                            DBNode lastNodeInDBPath = dbNodes.get(dbPath.getLast());
+                            DBNode nodeToAddNext = dbNodes.get(dbNeighbourNet.get(tempId));
+                            //get nodes with the same sectionId
+                            for (Long nodeOneVariation : equalNodes.get(lastNodeInDBPath.elementId)) {
+                                for (Long nodeTwoVariation : equalNodes.get(nodeToAddNext.elementId)) {
+                                    if (dbNodes.get(nodeOneVariation).sectionId == dbNodes.get(nodeTwoVariation).sectionId)
+                                        dbPathLength += Math.abs(dbNodes.get(nodeOneVariation).km - dbNodes.get(nodeTwoVariation).km);
+                                }
+                            }
+
                             dbPath.add(dbNeighbourNet.get(tempId));
                             tempId = dbNeighbourNet.get(tempId);
                         }
-                        System.out.println("DB-Path: " + dbPath.size());
-                        mapPath(startNode, dbNodes.get(neighbourId), dbPath);
+                        if (dbPath.size() > 2) {
+                            mapPath(dbNodes.get(neighbourId), startNode, dbPath, dbPathLength);
+                            System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat != -1).toList().size());
+                            System.out.println("Size of anchorNodes" + ": " + anchorNodes.size());
+                        }
                         cont = false;
                         break;
                     }
-                    visitedNodes.put(neighbourId, neighbourId);
+                    visitedNodes.put(dbNodes.get(neighbourId).elementId, dbNodes.get(neighbourId).elementId);
                     for (Long id : dbNodes.get(neighbourId).neighbours) {
-                        if (visitedNodes.get(id) == null) {
+                        if (visitedNodes.get(dbNodes.get(id).elementId) == null) {
                             updatedNodesToCheck.add(id);
                             dbNeighbourNet.put(id, neighbourId);
                         }
                     }
                 }
-                //System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat != -1).toList().size());
             }
         }
     }
 
-    private static void mapPath(DBNode startNode, DBNode endNode, List<Long> dbPath) {
+    private static void mapPath(DBNode startNode, DBNode endNode, List<Long> dbPath, double dbPathLength) {
         //get related osmPath
-        OSMNode osmStartNode = osmNodes.get(fixpoints.get(startNode.nodeId));
-        OSMNode osmEndNode = osmNodes.get(fixpoints.get(endNode.nodeId));
-
-        System.out.println("OSM-StartNode: " + osmStartNode.osmId);
-        System.out.println("OSM-EndNode: " + osmEndNode.osmId);
+        OSMNode osmStartNode = osmNodes.get(anchorNodes.get(startNode.nodeId));
+        OSMNode osmEndNode = osmNodes.get(anchorNodes.get(endNode.nodeId));
 
         ArrayList<Long> osmPath = new ArrayList<>();
-        ArrayList<Long> nodesToCheck;
-        ArrayList<Long> updatedNodesToCheck = (ArrayList<Long>) osmEndNode.neighbours.clone();
+        HashMap<Long, Double> nodesToCheck;
+        HashMap<Long, Double> updatedNodesToCheck = new HashMap<>();
+        for (Long nId : osmEndNode.neighbours) {
+            updatedNodesToCheck.put(nId, getDistance(osmEndNode.lat, osmEndNode.lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0);
+        }
 
         HashMap<Long, Long> visitedNodes = new HashMap<>();
         HashMap<Long, Long> osmNeighbourNet = new HashMap<>();
-        for (Long id : updatedNodesToCheck) {
+        for (Long id : updatedNodesToCheck.keySet()) {
             osmNeighbourNet.put(id, osmEndNode.osmId);
         }
         boolean cont = true;
         while (cont) {
-            nodesToCheck = (ArrayList<Long>) updatedNodesToCheck.clone();
-            for (Long osmNodeId : nodesToCheck) {
+            nodesToCheck = (HashMap<Long, Double>) updatedNodesToCheck.clone();
+            for (Long osmNodeId : nodesToCheck.keySet()) {
                 if (osmNodeId == osmStartNode.osmId) {
-                    //get osmPath
-                    osmPath.add(osmNodeId);
-                    Long tempId = osmNodeId;
-                    while (tempId != null && tempId != osmEndNode.osmId) {
-                        osmPath.add(osmNeighbourNet.get(tempId));
-                        tempId = osmNeighbourNet.get(tempId);
+                    if (nodesToCheck.get(osmNodeId) < dbPathLength * 1.01 && nodesToCheck.get(osmNodeId) > dbPathLength * 0.99) {
+                        //get osmPath
+                        osmPath.add(osmNodeId);
+                        Long tempId = osmNodeId;
+                        while (tempId != null && tempId != osmEndNode.osmId) {
+                            osmPath.add(osmNeighbourNet.get(tempId));
+                            tempId = osmNeighbourNet.get(tempId);
+                        }
+                        cont = false;
+                        break;
                     }
-                    cont = false;
-                    break;
+                    else {
+                        return;
+                    }
                 }
                 for (Long id : osmNodes.get(osmNodeId).neighbours) {
                     if (visitedNodes.get(id) == null)
                         osmNeighbourNet.put(id, osmNodeId);
                 }
-                visitedNodes.put(osmNodeId, osmNodeId);
-                updatedNodesToCheck.addAll(osmNodes.get(osmNodeId).neighbours.stream().filter(x -> visitedNodes.get(x) == null).toList());
+                if (osmNodeId != osmStartNode.osmId)
+                    visitedNodes.put(osmNodeId, osmNodeId);
+                for (Long nId : osmNodes.get(osmNodeId).neighbours.stream().filter(x -> visitedNodes.get(x) == null).toList()) {
+                    double osmPathLengthSoFar = nodesToCheck.get(osmNodeId) + getDistance(osmNodes.get(osmNodeId).lat, osmNodes.get(osmNodeId).lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0;
+                    updatedNodesToCheck.put(nId, osmPathLengthSoFar);
+                }
             }
         }
+
+        try {
+            writer.write("\n DB-start and DB-end: " + startNode + "; " + endNode + "\n OSM-start and osm-end: " + osmStartNode + "; " + osmEndNode + "\n");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
 
         //map nodes in paths
         OSMNode nodeBefore = null;
         OSMNode nodeAfter = null;
+        int dbNodeDist = 0;
+        int osmNodeDist = 0;
+        Long nearestOSMNode = 0L;
+
         int breakIndex = 0;
-        for (int i = 0; i < dbPath.size()-1; i++) {
+        for (int i = 0; i < dbPath.size()-2; i++) {
             DBNode dbNode = dbNodes.get(dbPath.get(i));
             DBNode nextDbNode = dbNodes.get(dbPath.get(i+1));
-            String key = String.valueOf(nextDbNode.elementId).concat(nextDbNode.type).concat(nextDbNode.ds100).concat(nextDbNode.stationName).concat(nextDbNode.name1);
-            double dbNodeDist = Math.abs(dbNode.km - dbNodes.get(equalNodes.get(key).stream().filter(x -> dbNodes.get(x).sectionId == nextDbNode.sectionId).toList().get(0)).km) / 1000.0;
 
-            double osmNodeDist = 0;
+            //update dbNodeDist
+            double lastDbDist = 0;
+            for (Long nodeOneVariation : equalNodes.get(dbNode.elementId)) {
+                for (Long nodeTwoVariation : equalNodes.get(nextDbNode.elementId)) {
+                    if (dbNodes.get(nodeOneVariation).sectionId == dbNodes.get(nodeTwoVariation).sectionId)
+                        lastDbDist = Math.abs(dbNodes.get(nodeOneVariation).km - dbNodes.get(nodeTwoVariation).km);
+                }
+            }
+
+            if (lastDbDist == 0) {
+                nextDbNode.lat = dbNode.lat;
+                nextDbNode.lon = dbNode.lon;
+                dbNodes.put(nextDbNode.nodeId, nextDbNode);
+                if (i==0)
+                    nearestOSMNode = osmStartNode.osmId;
+                if (anchorNodes.get(nextDbNode.nodeId) == null
+                        && (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross"))
+                        && (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing")))
+                    anchorNodes.put(nextDbNode.nodeId, nearestOSMNode);
+                continue;
+            }
+
+            dbNodeDist += lastDbDist;
             double lastOsmDist = 0;
-            System.out.println("OSM-Path " + osmPath.size());
             for (int j = breakIndex; j < osmPath.size()-1; j++) {
                 OSMNode osmNode = osmNodes.get(osmPath.get(j));
                 OSMNode nextOsmNode = osmNodes.get(osmPath.get(j + 1));
-                lastOsmDist = getDistance(osmNode.lat, osmNode.lon, nextOsmNode.lat, nextOsmNode.lon);
+                //update osmNodeDist
+                lastOsmDist = getDistance(osmNode.lat, osmNode.lon, nextOsmNode.lat, nextOsmNode.lon) * 1000.0;
                 osmNodeDist += lastOsmDist;
-                if (dbNodeDist < osmNodeDist) {
+                if (dbNodeDist <= osmNodeDist || i == dbPath.size()-3) {
                     nodeBefore = osmNode;
                     nodeAfter = nextOsmNode;
                     breakIndex = j+1;
                     break;
                 }
             }
+            //if switch -> add to anchorNodes
+            nearestOSMNode = (osmNodeDist - dbNodeDist < lastOsmDist - (osmNodeDist - dbNodeDist) ? nodeAfter.osmId : nodeBefore.osmId);
+            if (anchorNodes.get(nextDbNode.nodeId) == null && (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross"))) {
+                if (osmNodes.get(nearestOSMNode).tags.containsValue("switch") || osmNodes.get(nearestOSMNode).tags.containsValue("railway_crossing"))
+                    anchorNodes.put(nextDbNode.nodeId, nearestOSMNode);
+            }
             //get gps-tag for dbNode
-            setGpsTag(dbNode, nodeAfter, nodeBefore, (osmNodeDist - dbNodeDist) / lastOsmDist);
-            System.out.println(dbPath);
-            System.out.println("Mapped DB-Node: StreckenId: " + dbNode.streckenId + "; Typ: " + dbNode.type +
-                    "; SectionId: " + dbNode.sectionId + "; ElementId: " + dbNode.elementId
-                    + "; lat: " + dbNode.lat + "; lon: " + dbNode.lon);
+            if (dbNodes.get(nextDbNode.nodeId).lat == -1) {
+                setGpsTag(nextDbNode, nodeAfter, nodeBefore, osmNodeDist - dbNodeDist);
+            }
         }
+        System.out.println("dbPathLength: " + dbPathLength);
+        System.out.println("osmPathLength: " + osmNodeDist);
     }
 
-    private static void setGpsTag(DBNode dbNode, OSMNode nodeOne, OSMNode nodeTwo, double dist) {
-        dbNode.lat = nodeOne.lat + (nodeTwo.lat - nodeOne.lat) * dist;
-        dbNode.lon = nodeOne.lon + (nodeTwo.lon - nodeOne.lon) * dist;
+    private static void setGpsTag(DBNode dbNode, OSMNode nodeOne, OSMNode nodeTwo, int dist) {
+        dbNode.lat = nodeOne.lat + (nodeTwo.lat - nodeOne.lat) * (dist/1000.0);
+        dbNode.lon = nodeOne.lon + (nodeTwo.lon - nodeOne.lon) * (dist/1000.0);
         dbNodes.put(dbNode.nodeId, dbNode);
+        mappedNodes.add(dbNode);
+        try {
+            writer.write(dbNode.toString() + "\n");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static double getDistance(double lat1, double lon1, double lat2, double lon2) {
