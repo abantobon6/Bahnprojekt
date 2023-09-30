@@ -18,8 +18,8 @@ public class OSMNode {
     public ArrayList<Long> neighbours = new ArrayList<>();
 
     public String toString() {
-        return "[" + mapToString(tags)  + "; " + osmId + "; " + lat + "; " +
-                lon + "; Neighbours: " + listToString(neighbours) + "]";
+        return "[" + osmId + "; " + lat + "; " + lon + "; "
+                + mapToString(tags) + "; Neighbours: " + listToString(neighbours) + "]";
     }
 
     private String listToString(List<Long> list) {

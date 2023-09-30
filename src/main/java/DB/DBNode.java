@@ -40,9 +40,14 @@ public class DBNode {
                 sectionId + "; " + elementId + "; " +
                 km + "; " + type + "; " +
                 ds100 + "; " + stationName + "; " +
-                name1 + "; " + name2 + "; " + lat + "; " + lon + "; " +
+                name1 + "; " + name2 + "; " + lat + "; " + lon +
                 "; Neighbours: " + listToString(neighbours) + "]";
     }
+    public String print() {
+        return sectionId + ";" + elementId + ";" + km + ";" + type + ";" + ds100 + ";" +
+                stationName + ";" + name1 + ";" + name2 + ";" + lat + ";" + lon;
+    }
+
 
     private String listToString(List<Long> list) {
         String resultString = "";
