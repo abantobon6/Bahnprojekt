@@ -1,9 +1,11 @@
 package main.java.DB;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 
+/**
+ * Object that represents an DB node containing all its information.
+ */
 public class DBNode {
 
     public DBNode(long nodeId, int streckenId, long sectionId, long elementId, long km,String type, String ds100, String stationName, String name1, String name2) {
@@ -35,6 +37,11 @@ public class DBNode {
     public double lat = -1;
     public double lon = -1;
 
+    /**
+     * Returns a String containing all the information this object contains.
+     *
+     * @return String representation of concatenation of the attributes of this object
+     */
     public String toString() {
         return "[" + streckenId + "; " +
                 sectionId + "; " + elementId + "; " +
@@ -43,51 +50,30 @@ public class DBNode {
                 name1 + "; " + name2 + "; " + lat + "; " + lon +
                 "; Neighbours: " + listToString(neighbours) + "]";
     }
+
+    /**
+     * Returns a String containing all the information given by the input data plus gps location.
+     * String is the same design as a line of the input data.
+     *
+     * @return String representation of concatenation of the attributes of this object (without neighbours)
+     */
     public String print() {
         return sectionId + ";" + elementId + ";" + km + ";" + type + ";" + ds100 + ";" +
                 stationName + ";" + name1 + ";" + name2 + ";" + lat + ";" + lon;
     }
 
 
+    /**
+     * Returns the concatenation of the elements of a list transformed to Strings.
+     *
+     * @param list list
+     * @return String representation of concatenation of the elements of list
+     */
     private String listToString(List<Long> list) {
         String resultString = "";
         for (Long l : list) {
             resultString = resultString.concat(String.valueOf(l).concat(", "));
         }
         return resultString;
-    }
-
-    public void setNodeId(Long nodeId) {
-        this.nodeId = nodeId;
-    }
-    public void setStreckenId(int streckenId) {
-        this.streckenId = streckenId;
-    }
-    public void setSectionId(long sectionId) {
-        this.sectionId = sectionId;
-    }
-    public void setElementId(long elementId) {
-        this.elementId = elementId;
-    }
-    public void setKm(long km) {
-        this.km = km;
-    }
-    public void setType(String type) {
-        this.type = type;
-    }
-    public void setDs100(String ds100) {
-        this.ds100 = ds100;
-    }
-    public void setStationName(String stationName) {
-        this.stationName = stationName;
-    }
-    public void setName1(String name1) {
-        this.name1 = name1;
-    }
-    public void setName2(String name2) {
-        this.name2 = name2;
-    }
-    public void setNeighbours(List<Long> neighbours) {
-        this.neighbours = neighbours;
     }
 }

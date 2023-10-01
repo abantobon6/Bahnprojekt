@@ -11,6 +11,7 @@ import main.java.DB.DBNode;
 import main.java.DB.DBSection;
 import main.java.DB.DBWay;
 import main.java.OSM.OSMNode;
+import main.java.OSM.OSMPath;
 import main.java.OSM.OSMWay;
 
 import java.io.*;
@@ -27,16 +28,27 @@ public class Main {
     private static HashMap<Long, OSMNode> osmNodes = new HashMap<>();
     //registered nodes from DB-track-plan
     private static HashMap<Long,DBNode> dbNodes = new HashMap<>();
+    //registered ways from OpenStreetMap-data
     private static HashMap<Long,OSMWay> osmWays = new HashMap<>();
+    //registered tracks from DB-track-plan
     private static HashMap<Integer, DBWay> dbWays = new HashMap<>();
+    //DBNodes mapped to element_id (f.e. switches only show up once)
     private static HashMap<Long, List<Long>> equalNodes = new HashMap<>();
+    //ds100 mapped to its geographic middle
     private static HashMap<String, Double[]> betriebsstellen = new HashMap<String, Double[]>();
-    private static HashMap<Long, Long> anchorNodes = new HashMap<>(); //dbNodes mapped to osmNodes
+    //dbNodes mapped to osmNodes
+    private static HashMap<Long, Long> anchorNodes = new HashMap<>();
+    //anchorNodes with one or mor unmapped neighbours
     private static HashMap<Long, Long> openAnchorNodes = new HashMap<>();
-    private static int countOfMissedPaths1 = 0;
-    private static int countOfMissedPaths2 = 0;
-    private static int countOfMissedPaths3 = 0;
 
+    /**
+     * Adds gps coordinates to a number of DBNodes using the information from the OpenStreetMap data.
+     *
+     * Creates a copy of the DB-data with added gps coordinates to the nodes.
+     *
+     * @param args
+     * @throws FileNotFoundException
+     */
     public static void main(String[] args) throws FileNotFoundException {
         System.out.println("Starting OSM...");
         readOSM();
@@ -58,6 +70,9 @@ public class Main {
         System.out.println("Finished!");
     }
 
+    /**
+     * Prints some information regarding the registered DB-data.
+     */
     private static void printDBInfo() {
         int ctrSections = 0;
         System.out.println("DB Info:");
@@ -106,6 +121,9 @@ public class Main {
         System.out.println();
     }
 
+    /**
+     * Prints some information regarding the registered OSM-data.
+     */
     private static void printOSMInfo() {
         System.out.println();
         System.out.println("OSM Info:");
@@ -137,6 +155,9 @@ public class Main {
         System.out.println();
     }
 
+    /**
+     * Reads all the files in "data/DB" and stores the collected data in several HashMaps.
+     */
     private static void readDB() {
         //read files
         try {
@@ -196,6 +217,9 @@ public class Main {
         }
     }
 
+    /**
+     * Reads file "data/betriebsstelleToGPS.osm" and stores the collected data in HashMap betriebsstellen.
+     */
     private static void readBetriebsstellenMapping() {
         try {
             BufferedReader br = new BufferedReader(new FileReader("data/betriebsstelleToGps.CSV"));
@@ -210,6 +234,9 @@ public class Main {
         }
     }
 
+    /**
+     * Reads file "data/germany_railway.osm" and stores the collected data in several HashMaps.
+     */
     private static void readOSM() throws FileNotFoundException {
         Node tmpNode;
         Way tmpWay;
@@ -244,58 +271,56 @@ public class Main {
         }
     }
 
+    /**
+     * Searches for nodes that occur in both data sets and stores these found "anchor nodes" in anchorNodes.
+     * Maps DB nodes to OSM nodes.
+     */
     private static void findAnchorNodes() {
-        int ctrUnusedAnchorpoints = 0;
-        List<DBNode> dbSwitches = equalNodes.values().stream().map(x -> dbNodes.get(x.get(0))).filter(y -> (Objects.equals(y.type, "simple_switch")
-                                                                    || Objects.equals(y.type, "cross")
-                                                                    || Objects.equals(y.type, "ms"))).toList();
-        for (OSMWay way : osmWays.values()) {
-            if (!way.tags.containsKey("ref"))
-                continue;
-            String wayRef = way.tags.get("ref");
-            for (OSMNode osmNode : way.nodes) {
-                if (osmNode.tags.containsKey("ref") &&
-                        (osmNode.tags.containsValue("switch") || osmNode.tags.containsValue("signal:main") || osmNode.tags.containsValue("railway_crossing"))) {
-                    ArrayList<DBNode> potentialDbNodes = new ArrayList<>();
-                    ArrayList<Long> potentialDbElementIds = new ArrayList<>();
-                    for (DBNode dbSwitch : dbSwitches) {
-                        if (!potentialDbElementIds.contains(dbSwitch.elementId) && Objects.equals(String.valueOf(dbSwitch.streckenId), wayRef)
-                                && (Objects.equals(osmNode.tags.get("ref"), dbSwitch.name1)
-                                || Objects.equals(osmNode.tags.get("ref"), dbSwitch.name2)
-                                || Objects.equals(osmNode.tags.get("ref"), "W" + dbSwitch.name1)
-                                || Objects.equals(osmNode.tags.get("ref"), "W" + dbSwitch.name2))) {
-                            potentialDbElementIds.add(dbSwitch.elementId);
-                            potentialDbNodes.add(dbSwitch);
-                        }
-                    }
-                    if (!potentialDbNodes.isEmpty()) {
-                        DBNode minDistNode = potentialDbNodes.get(0);
-                        if (potentialDbNodes.size() > 1) {
-                            double minDist = Double.MAX_VALUE;
-                            if (potentialDbNodes.stream().anyMatch(x -> betriebsstellen.get(x.ds100) == null)) {
-                                ctrUnusedAnchorpoints += potentialDbNodes.size();
-                                continue;
-                            }
-                            for (DBNode n : potentialDbNodes) {
-                                double tempDist;
-                                if ((tempDist = getDistance(osmNode.lat, osmNode.lon, betriebsstellen.get(n.ds100)[0], betriebsstellen.get(n.ds100)[1])) < minDist) {
-                                    minDist = tempDist;
-                                    minDistNode = n;
-                                }
-                            }
-                        }
-                        anchorNodes.put(minDistNode.nodeId, osmNode.osmId);
-                        openAnchorNodes.put(minDistNode.nodeId, osmNode.osmId);
-                        minDistNode.lat = osmNode.lat;
-                        minDistNode.lon = osmNode.lon;
-                        dbNodes.put(minDistNode.nodeId, minDistNode);
+        List<DBNode> dbSwitches = equalNodes.values().stream().map(x -> dbNodes.get(x.get(0)))
+                .filter(y -> (!y.name1.isEmpty() || !y.name2.isEmpty())
+                        && (Objects.equals(y.type, "simple_switch")
+                        || Objects.equals(y.type, "cross"))).toList();
+        List<OSMNode> osmSwitches = osmNodes.values().stream()
+                .filter(x -> x.tags.containsKey("ref")
+                        && (x.tags.containsValue("switch")
+                        || x.tags.containsValue("railway_crossing"))).toList();
+        int ctr = 0;
+        for (OSMNode osmSwitch : osmSwitches) {
+            ctr++;
+            //get nearest Betriebsstelle
+            String nearestDS100 = "";
+            double distToNearestBS = Double.MAX_VALUE;
+            for (String bs : betriebsstellen.keySet()) {
+                if (distToNearestBS > getDistance(osmSwitch.lat, osmSwitch.lon, betriebsstellen.get(bs)[0], betriebsstellen.get(bs)[1]) * 1000) {
+                    distToNearestBS = getDistance(osmSwitch.lat, osmSwitch.lon, betriebsstellen.get(bs)[0], betriebsstellen.get(bs)[1]) * 1000;
+                    nearestDS100 = bs;
+                }
+            }
+            String finalNearestDS10 = nearestDS100;
+
+            //get fitting DBNode
+            for (DBNode dbSwitch : dbSwitches.stream().filter(z -> Objects.equals(z.ds100, finalNearestDS10)).toList()) {
+                if ((Objects.equals(osmSwitch.tags.get("ref"), dbSwitch.name1)
+                        || Objects.equals(osmSwitch.tags.get("ref"), dbSwitch.name2)
+                        || Objects.equals(osmSwitch.tags.get("ref"), "W" + dbSwitch.name1)
+                        || Objects.equals(osmSwitch.tags.get("ref"), "W" + dbSwitch.name2))) {
+                    for (Long l : equalNodes.get(dbSwitch.elementId)) {
+                        anchorNodes.put(l, osmSwitch.osmId);
+                        openAnchorNodes.put(l, osmSwitch.osmId);
+                        dbNodes.get(l).lat = osmSwitch.lat;
+                        dbNodes.get(l).lon = osmSwitch.lon;
                     }
                 }
             }
         }
-        System.out.println("Unused anchornodes: " + ctrUnusedAnchorpoints);
     }
 
+    /**
+     * Takes a list containing OsmTags and converts it to a HashMap mapping the OsmTag-keys to their values.
+     *
+     * @param list List of OSMTags
+     * @return Map of OsmTag-keys to OsmTag-values
+     */
     private static Map<String, String> convertListToMap(List<? extends OsmTag> list) {
         Map<String, String> map = new HashMap<>();
         for (OsmTag tag : list) {
@@ -304,8 +329,13 @@ public class Main {
         return map;
     }
 
+    /**
+     * Starts at a random anchorNode and searches through the DB Net until it finds another anchorNode.
+     * Stores the path taken.
+     */
     public static void mapNodes() {
         int ctr = 0;
+        outerLoop:
         while (!openAnchorNodes.isEmpty()) {
             DBNode startNode = dbNodes.get(openAnchorNodes.keySet().stream().toList().get(new Random().nextInt(openAnchorNodes.size())));
             if (dbNodes.get(startNode.nodeId).neighbours.stream().allMatch(x -> dbNodes.get(x).lat != -1)) {
@@ -318,7 +348,6 @@ public class Main {
 
             HashMap<Long, Long> dbNeighbourNet = new HashMap<>();
             HashMap<Long, Long> visitedNodes = new HashMap<>();
-            visitedNodes.put(startNode.elementId, 0L);
             for (Long neighbourId : nodesToCheck) {
                 dbNeighbourNet.put(neighbourId, startNode.nodeId);
             }
@@ -328,7 +357,7 @@ public class Main {
                 nodesToCheck = (ArrayList<Long>) updatedNodesToCheck.clone();
                 updatedNodesToCheck = new ArrayList<>();
                 for (Long neighbourId : nodesToCheck) {
-                    if (anchorNodes.get(neighbourId) != null && dbNodes.get(neighbourId).elementId != startNode.elementId) {
+                    if (anchorNodes.get(neighbourId) != null && neighbourId != startNode.nodeId) {
                         //get dbPath
                         LinkedList<Long> dbPath = new LinkedList<>();
                         int dbPathLength = 0;
@@ -348,6 +377,8 @@ public class Main {
                                         dbPathLength += Math.abs(dbNodes.get(nodeOneVariation).km - dbNodes.get(nodeTwoVariation).km);
                                 }
                             }
+                            if (dbPathLength > 1000000)
+                                continue outerLoop;
                             if (Objects.equals(dbNodes.get(dbNeighbourNet.get(tempId)).type, "simple_switch"))
                                 ctrSwitches++;
                             if (Objects.equals(dbNodes.get(dbNeighbourNet.get(tempId)).type, "cross"))
@@ -357,13 +388,9 @@ public class Main {
                         }
                         Collections.reverse(dbPath);
                         mapPath(startNode, dbNodes.get(neighbourId), dbPath, dbPathLength, ctrSwitches, ctrCrosses);
-                        if (ctr == 1000) {
+                        if (ctr == 500) {
                             System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat != -1).toList().size());
                             System.out.println("Size of OpenAnchorNodes" + ": " + openAnchorNodes.size());
-                            System.out.println("Count of missed paths 0: " + countOfMissedPaths1);
-                            System.out.println("Count of missed paths !=: " + countOfMissedPaths2);
-                            countOfMissedPaths1 = 0;
-                            countOfMissedPaths2 = 0;
                             ctr = 0;
                         }
                         ctr++;
@@ -382,76 +409,69 @@ public class Main {
         }
     }
 
+    /**
+     * Finds the best fitting (OSM-)path using OSM-data and maps the nodes within the DB-path.
+     *
+     * @param startNode start node of the path taken in mapNodes()
+     * @param endNode end node of the path taken in mapNodes()
+     * @param dbPath path taken in mapNodes()
+     * @param dbPathLength length of the path taken in mapNodes()
+     * @param ctrDBSwitches count of switches in the path taken in mapNodes()
+     * @param ctrDBCrosses count of crosses in the path taken in mapNodes()
+     */
     private static void mapPath(DBNode startNode, DBNode endNode, List<Long> dbPath, double dbPathLength, double ctrDBSwitches, double ctrDBCrosses) {
         //get related osmPath
         OSMNode osmStartNode = osmNodes.get(openAnchorNodes.get(startNode.nodeId));
         OSMNode osmEndNode = osmNodes.get(anchorNodes.get(endNode.nodeId));
+
         double osmPathLength = 0.0;
-        double viceOsmPathLength = 0.0;
-
         ArrayList<Long> osmPath = new ArrayList<>();
-        ArrayList<Long>[] viceOsmPath = new ArrayList[]{new ArrayList<Long>(), new ArrayList<Long>(List.of(0L))};
         double bestPathLengthDif = Double.MAX_VALUE;
-        HashMap<Long, Double[]> nodesToCheck;
-        HashMap<Long, Double[]> updatedNodesToCheck = new HashMap<>();
-        for (Long nId : osmStartNode.neighbours) {
-            updatedNodesToCheck.put(nId,
-                    new Double[]{getDistance(osmStartNode.lat, osmStartNode.lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0,
-                            osmNodes.get(nId).tags.containsValue("switch") ? 1.0 : 0.0,
-                            osmNodes.get(nId).tags.containsValue("railway_crossing") ? 1.0 : 0.0, 1.0});
+
+        ArrayList<Long> nodesToCheck;
+        ArrayList<Long> updatedNodesToCheck = osmStartNode.neighbours;
+
+        HashMap<Long, List<OSMPath>> osmNeighbourNet = new HashMap<>();
+        for (Long id : updatedNodesToCheck) {
+            OSMPath newPath = new OSMPath(new ArrayList<>(List.of(osmStartNode.osmId)), getDistance(osmStartNode.lat, osmStartNode.lon, osmNodes.get(id).lat, osmNodes.get(id).lon) * 1000.0);
+            osmNeighbourNet.put(id, new ArrayList<>(List.of(newPath)));
         }
 
-        HashMap<Long, List<Long>> osmNeighbourNet = new HashMap<>();
-        for (Long id : updatedNodesToCheck.keySet()) {
-            osmNeighbourNet.put(id, new ArrayList<>(List.of(osmStartNode.osmId)));
-        }
-        boolean found1 = false;
-        double countOfDists1 = 0;
-        double countOfDists2 = 0;
         boolean cont = true;
         while (cont && !updatedNodesToCheck.isEmpty()) {
             cont = false;
-            nodesToCheck = (HashMap<Long, Double[]>) updatedNodesToCheck.clone();
-            updatedNodesToCheck = new HashMap<>();
-            for (Long osmNodeId : nodesToCheck.keySet()) {
-                if (nodesToCheck.get(osmNodeId)[0] < dbPathLength)
-                    cont = true;
-                if ((osmNeighbourNet.get(osmNodeId) != null && osmNeighbourNet.get(osmNodeId).contains(osmNodeId))
-                        || nodesToCheck.get(osmNodeId)[2] > ctrDBCrosses
-                        || nodesToCheck.get(osmNodeId)[1] > ctrDBSwitches)
-                    continue;
-                if (osmNodeId == osmEndNode.osmId) {
-                    //get osmPath
-                    if (nodesToCheck.get(osmNodeId)[1] == ctrDBSwitches && nodesToCheck.get(osmNodeId)[2] == ctrDBCrosses) {
-                        found1 = true;
-                        if (bestPathLengthDif > Math.abs(dbPathLength - nodesToCheck.get(osmNodeId)[0])) {
-                            bestPathLengthDif = Math.abs(dbPathLength - nodesToCheck.get(osmNodeId)[0]);
-                            osmPathLength = nodesToCheck.get(osmNodeId)[0];
-                            countOfDists1 = nodesToCheck.get(osmNodeId)[3];
-                            osmPath = (ArrayList<Long>) osmNeighbourNet.get(osmNodeId);
+            nodesToCheck = (ArrayList<Long>) updatedNodesToCheck.clone();
+            updatedNodesToCheck = new ArrayList<>();
+            //check through new range of neighbours
+            for (Long osmNodeId : nodesToCheck) {
+                //check through paths that end at these neighbours
+                for (OSMPath path : osmNeighbourNet.get(osmNodeId)) {
+                    if (path.nodes.contains(osmNodeId))
+                        continue;
+                    if (path.length < dbPathLength)
+                        cont = true;
+                    if (osmNodeId == osmEndNode.osmId) {
+                        //get best osmPath
+                        if (path.nodes.size() < ctrDBCrosses + ctrDBSwitches)
+                            break;
+                        if (bestPathLengthDif > Math.abs(dbPathLength - path.length)) {
+                            bestPathLengthDif = Math.abs(dbPathLength - path.length);
+                            osmPathLength = path.length;
+                            osmPath = path.nodes;
                             osmPath.add(osmNodeId);
                         }
+                        continue;
                     }
-                    else if (nodesToCheck.get(osmNodeId)[1] + nodesToCheck.get(osmNodeId)[2] > viceOsmPath[1].get(0)) {
-                        viceOsmPathLength = nodesToCheck.get(osmNodeId)[0];
-                        countOfDists2 = nodesToCheck.get(osmNodeId)[3];
-                        viceOsmPath[0] = (ArrayList<Long>) osmNeighbourNet.get(osmNodeId);
-                        viceOsmPath[0].add(osmNodeId);
-                        viceOsmPath[1].set(0, (long) (nodesToCheck.get(osmNodeId)[1] + nodesToCheck.get(osmNodeId)[2]));
-                    }
-                    continue;
-                }
-                List<Long> osmPathSoFar = new ArrayList<>(osmNeighbourNet.get(osmNodeId));
-                osmPathSoFar.add(osmNodeId);
-                for (Long nId : osmNodes.get(osmNodeId).neighbours) {
-                    osmNeighbourNet.put(nId, osmPathSoFar);
 
-                    double osmPathLengthSoFar = nodesToCheck.get(osmNodeId)[0] + getDistance(osmNodes.get(osmNodeId).lat, osmNodes.get(osmNodeId).lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0;
-                    updatedNodesToCheck.put(nId,
-                            new Double[]{osmPathLengthSoFar,
-                                    osmNodes.get(nId).tags.containsValue("switch") ? nodesToCheck.get(osmNodeId)[1]+1 : nodesToCheck.get(osmNodeId)[1],
-                                    osmNodes.get(nId).tags.containsValue("railway_crossing") ? nodesToCheck.get(osmNodeId)[2]+1 : nodesToCheck.get(osmNodeId)[2],
-                                    nodesToCheck.get(osmNodeId)[3]+1});
+                    path.nodes.add(osmNodeId);
+                    for (Long nId : osmNodes.get(osmNodeId).neighbours) {
+                        path.length = path.length + getDistance(osmNodes.get(osmNodeId).lat, osmNodes.get(osmNodeId).lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0;
+                        List<OSMPath> pathsToThatNode = osmNeighbourNet.getOrDefault(nId, new ArrayList<>());
+                        pathsToThatNode.add(path);
+                        osmNeighbourNet.put(nId, pathsToThatNode);
+                        if (!updatedNodesToCheck.contains(nId))
+                            updatedNodesToCheck.add(nId);
+                    }
                 }
             }
         }
@@ -462,22 +482,15 @@ public class Main {
         for (Long osmNodeShow : osmPath)
             showOSMPath.add(osmNodes.get(osmNodeShow));
 
-        if (!found1) {
-            osmPath = viceOsmPath[0];
-            osmPathLength = viceOsmPathLength;
-        }
-        else if (osmPath.size() != countOfDists1+1) {
-            countOfMissedPaths2++;
-            return;
-        }
         if (osmPath.isEmpty()) {
-            countOfMissedPaths1++;
+            dbNodes.get(dbPath.get(1)).lat = -2;
+            dbNodes.get(dbPath.get(1)).lon = -2;
             return;
         }
 
         //map nodes in paths
-        OSMNode nodeBefore = null;
-        OSMNode nodeAfter = null;
+        OSMNode nodeBefore;
+        OSMNode nodeAfter;
         double dbNodeDist = 0;
         double osmNodeDist = 0;
 
@@ -485,6 +498,8 @@ public class Main {
         for (int i = 0; i < dbPath.size()-2; i++) {
             DBNode dbNode = dbNodes.get(dbPath.get(i));
             DBNode nextDbNode = dbNodes.get(dbPath.get(i+1));
+            nodeBefore = osmNodes.get(osmPath.get(0));
+            nodeAfter = osmNodes.get(osmPath.get(1));
 
             //update dbNodeDist
             double lastDbDist = 0;
@@ -536,6 +551,13 @@ public class Main {
         }
     }
 
+    /**
+     * Finds the nearest (OSM-)switch/cross with matching "ref" to the (DB-)switch/cross and storing it as an anchorNode.
+     *
+     * @param dbNode DB-switch/cross
+     * @param osmNode OSM-switch/cross
+     * @param osmPath OSM-path containing osmNode and fitting the DB-path containing dbNode
+     */
     private static void mapBestOsmNodeFit(DBNode dbNode, OSMNode osmNode, ArrayList<Long> osmPath) {
         long bestOsmNodeFit = 0L;
         int j = 1;
@@ -561,21 +583,41 @@ public class Main {
         }
         if (bestOsmNodeFit == 0)
             return;
-        if (anchorNodes.get(dbNode.nodeId) == null) {
-            openAnchorNodes.put(dbNode.nodeId, bestOsmNodeFit);
-            anchorNodes.put(dbNode.nodeId, bestOsmNodeFit);
+        for (Long l : equalNodes.get(dbNode.elementId)) {
+            if (anchorNodes.get(l) == null) {
+                openAnchorNodes.put(l, bestOsmNodeFit);
+                anchorNodes.put(l, bestOsmNodeFit);
+            }
+            dbNodes.get(l).lat = osmNodes.get(bestOsmNodeFit).lat;
+            dbNodes.get(l).lon = osmNodes.get(bestOsmNodeFit).lon;
         }
-        dbNode.lat = osmNodes.get(bestOsmNodeFit).lat;
-        dbNode.lon = osmNodes.get(bestOsmNodeFit).lon;
-        dbNodes.put(dbNode.nodeId, dbNode);
     }
 
+    /**
+     * Sets lan and lon of dbNode, using the gps tags from nodeOne and nodeTwo and the distance between dbNode and nodeOne.
+     * dbNode has to lie on a straight line between nodeOne and nodeTwo.
+     *
+     * @param dbNode node to map
+     * @param nodeOne start node of direct line
+     * @param nodeTwo end node of direct line
+     * @param dist distance from nodeOne to dbNode
+     */
     private static void setGpsTag(DBNode dbNode, OSMNode nodeOne, OSMNode nodeTwo, double dist) {
-        dbNode.lat = nodeOne.lat + (nodeTwo.lat - nodeOne.lat) * (dist/1000.0);
-        dbNode.lon = nodeOne.lon + (nodeTwo.lon - nodeOne.lon) * (dist/1000.0);
-        dbNodes.put(dbNode.nodeId, dbNode);
+        for (Long l : equalNodes.get(dbNode.elementId)) {
+            dbNodes.get(l).lat = nodeOne.lat + (nodeTwo.lat - nodeOne.lat) * (dist/1000.0);
+            dbNodes.get(l).lon = nodeOne.lon + (nodeTwo.lon - nodeOne.lon) * (dist/1000.0);
+        }
     }
 
+    /**
+     * Returns the distance between tho gps locations in km.
+     *
+     * @param lat1 latitude of first gps location
+     * @param lon1 longitude of first gps location
+     * @param lat2 latitude of second gps location
+     * @param lon2 longitude of second gps location
+     * @return distance between first and second gps location in km
+     */
     public static double getDistance(double lat1, double lon1, double lat2, double lon2) {
         int radius = 6371;
 
@@ -588,6 +630,10 @@ public class Main {
 
         return Math.abs(d);
     }
+
+    /**
+     * Writes the DB-nodes in dbNodes, now containing gps location tags, in several csv-files (mirroring the input data files).
+     */
     public static void dumpMappedNodes() {
         for (Integer outputWay : dbWays.keySet()) {
             File file = new File("data/mappedDBNodes/" + outputWay + ".csv");

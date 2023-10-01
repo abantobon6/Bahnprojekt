@@ -1,9 +1,11 @@
 package main.java.OSM;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Object that represents an OSM node containing all its information.
+ */
 public class OSMNode {
     public OSMNode(Map<String, String> tags, long osmId, double lon, double lat) {
         this.tags = tags;
@@ -22,6 +24,12 @@ public class OSMNode {
                 + mapToString(tags) + "; Neighbours: " + listToString(neighbours) + "]";
     }
 
+    /**
+     * Returns the concatenation of the elements of a list transformed to Strings.
+     *
+     * @param list list
+     * @return String representation of concatenation of the elements of list
+     */
     private String listToString(List<Long> list) {
         String resultString = "";
         for (Long l : list) {
@@ -30,15 +38,15 @@ public class OSMNode {
         return resultString;
     }
 
-    public String print() {
-        return "<node id=\""+ osmId +"\" version=\"10\" timestamp=\"2"+ LocalDateTime.now().toString() +"\" uid=\"0\" user=\"\" lat=\""+ lat +"\" lon=\""+ lon +"\">\n" +
-                mapToString(tags);
-    }
-
+    /**
+     * Returns the concatenation of the values of a Map transformed to Strings.
+     *
+     * @param map map
+     * @return String representation of concatenation of the values of map
+     */
     private String mapToString(Map<String, String> map) {
-        String mapAsString = map.keySet().stream()
+        return map.keySet().stream()
                 .map(key -> key + "=" + map.get(key))
                 .collect(Collectors.joining(", ", "{", "}"));
-        return mapAsString;
     }
 }
