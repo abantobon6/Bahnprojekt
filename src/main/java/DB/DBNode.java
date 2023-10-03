@@ -59,7 +59,7 @@ public class DBNode {
      */
     public String print() {
         return sectionId + ";" + elementId + ";" + km + ";" + type + ";" + ds100 + ";" +
-                stationName + ";" + name1 + ";" + name2 + ";" + lat + ";" + lon;
+                stationName + ";" + name1 + ";" + name2 + ";\'" + lat + ";\'" + lon;
     }
 
 
