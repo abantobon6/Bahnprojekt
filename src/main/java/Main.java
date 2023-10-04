@@ -21,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.stream.Stream;
 
 public class Main {
 
@@ -57,11 +56,18 @@ public class Main {
      * Creates a copy of the DB-data with added gps coordinates to the nodes.
      *
      * @param args
-     * @throws FileNotFoundException
      */
-    public static void main(String[] args) throws FileNotFoundException {
+    public static void main(String[] args) {
+        start(1, false);
+    }
+
+    private static void start(int strategy, boolean rigorousExtension) {
         System.out.println("Starting OSM...");
-        readOSM();
+        try {
+            readOSM();
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        }
         System.out.println("Finished OSM. Starting DB...");
         readDB();
         readBetriebsstellenMapping();
@@ -73,23 +79,22 @@ public class Main {
         findAnchorNodes();
         System.out.println("Found " + anchorNodes.size() + " anchorNodes" + ".");
         System.out.println("Start mapping nodes...");
-        mapDBNodes(2);
+        mapDBNodes(strategy, rigorousExtension);
         System.out.println("Mapped " + dbNodes.values().stream().filter(x -> x.lat > 0).toList().size() + " nodes.");
         System.out.println("Start dumping...");
         dumpMappedNodes();
         System.out.println("Finished!");
     }
-
     /**
      * Calls the method representing the indicated strategy
      *
      * @param strategy indicates the mapping strategy
      */
-    private static void mapDBNodes(int strategy) {
+    private static void mapDBNodes(int strategy, boolean rigorousExtension) {
         if (strategy == 1)
-            mapNodesS1();
+            mapNodesS1(rigorousExtension);
         if (strategy == 2)
-            mapNodesS2();
+            mapNodesS2(rigorousExtension);
     }
 
     /**
@@ -192,7 +197,7 @@ public class Main {
             }
             b.close();
 
-            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("data/DC"));
+            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("data/DB"));
             for (Path filePath : ds) {
                 int streckenId = Integer.parseInt(filePath.toString().substring(8, 12));
 
@@ -205,8 +210,6 @@ public class Main {
                 while((line = br.readLine()) != null) {
                     String[] tags = line.split(";", -1);
                     DBNode node = new DBNode(Long.parseLong(tags[0].concat(tags[1])), streckenId, Long.parseLong(tags[0]), Long.parseLong(tags[1]), Long.parseLong(tags[2]), tags[3], tags[4], tags[5], tags[6], tags[7]);
-                    if (nodesToAvoid.contains(node.nodeId))
-                        continue;
                     dbNodes.put(node.nodeId, node);
                     equalNodes.putIfAbsent(node.elementId, new ArrayList<>());
                     equalNodes.get(node.elementId).add(node.nodeId);
@@ -367,40 +370,53 @@ public class Main {
      * Starts at a random unmapped Node and searches through the DB-Net until it finds two anchorNode.
      * Stores the path taken.
      */
-    public static void mapNodesS2() {
+    public static void mapNodesS2(boolean rigorousExtension) {
         LinkedList<Long> noGoodNodes = new LinkedList<>();
         DBNode middleNode;
         LinkedList<Long> startNodePath;
         LinkedList<Long> endNodePath;
         int ctr = 0;
         while (true) {
-            List<Long> filteredDBNodes = dbNodes.keySet().stream().filter(x -> dbNodes.get(x).lat == -1 && dbNodes.get(x).neighbours.size() > 1 && !noGoodNodes.contains(x)).toList();
+            List<Long> filteredDBNodes = dbNodes.keySet().stream().filter(x -> dbNodes.get(x).lat == -1 && !noGoodNodes.contains(x) && dbNodes.get(x).neighbours.size() > 1).toList();
             if (filteredDBNodes.isEmpty())
                 break;
             middleNode = dbNodes.get(filteredDBNodes.get(new Random().nextInt(filteredDBNodes.size())));
             double dbPathLength = 0;
+            int countOfBranches = 0;
 
             //find startNode and path
-            DBPath path1 = getDBPathToAnchorNode(middleNode, dbNodes.get(middleNode.neighbours.get(0)), 0L);
+            DBPath path1 = getDBPathToAnchorNode(middleNode, dbNodes.get(middleNode.neighbours.get(0)), new HashSet<>());
             dbPathLength += path1.length;
+            countOfBranches += path1.countOfBranches;
             startNodePath = path1.nodes;
             if (startNodePath.isEmpty()) {
-                noGoodNodes.add(middleNode.nodeId);
+                middleNode.lat = -2;
+                middleNode.lon = -2;
                 continue;
             }
 
             //find endNode and path
-            DBPath path2 = getDBPathToAnchorNode(middleNode, dbNodes.get(middleNode.neighbours.get(1)), startNodePath.get(0));
+            DBPath path2 = getDBPathToAnchorNode(middleNode, dbNodes.get(middleNode.neighbours.get(1)), new HashSet<>(path1.nodes));
             dbPathLength += path2.length;
+            countOfBranches += path2.countOfBranches;
             endNodePath = path2.nodes;
-            Collections.reverse(endNodePath);
-            if (endNodePath.isEmpty()) {
-                noGoodNodes.add(middleNode.nodeId);
+            if (endNodePath.isEmpty() || dbPathLength > 15000) {
+                middleNode.lat = -2;
+                middleNode.lon = -2;
+                for (Long l : endNodePath) {
+                    dbNodes.get(l).lat = -2;
+                    dbNodes.get(l).lat = -2;
+                }
+                for (Long l : startNodePath) {
+                    dbNodes.get(l).lat = -2;
+                    dbNodes.get(l).lat = -2;
+                }
                 continue;
             }
+            Collections.reverse(endNodePath);
             endNodePath.removeFirst();
             startNodePath.addAll(endNodePath);
-            mapPath(dbNodes.get(startNodePath.getFirst()), dbNodes.get(startNodePath.getLast()), startNodePath, dbPathLength, middleNode);
+            mapPath(dbNodes.get(startNodePath.getFirst()), dbNodes.get(startNodePath.getLast()), startNodePath, dbPathLength, middleNode, countOfBranches, rigorousExtension);
             try {
                 writer.write("\n");
             } catch (IOException e) {
@@ -408,6 +424,7 @@ public class Main {
             }
             if (ctr == 500) {
                 System.out.println("Mapped nodes: " + dbNodes.values().stream().filter(x -> x.lat > -1).toList().size());
+                System.out.println("Remaining nodes to check: " + filteredDBNodes.size());
                 ctr = 0;
             }
             ctr++;
@@ -418,7 +435,7 @@ public class Main {
      * Starts at a random anchorNode and searches through the DB-Net until it finds another anchorNode.
      * Stores the path taken.
      */
-    public static void mapNodesS1() {
+    public static void mapNodesS1(boolean rigorousExtension) {
         int ctr = 0;
         while (!openAnchorNodes.isEmpty()) {
             DBNode startNode = dbNodes.get(openAnchorNodes.keySet().stream().toList().get(new Random().nextInt(openAnchorNodes.size())));
@@ -449,7 +466,7 @@ public class Main {
                         double dbPathLength = dbPath.length;
 
                         Collections.reverse(path);
-                        mapPath(startNode, dbNodes.get(neighbourId), path, dbPathLength, startNode);
+                        mapPath(startNode, dbNodes.get(neighbourId), path, dbPathLength, startNode, dbPath.countOfBranches, rigorousExtension);
                         try {
                             writer.write("\n");
                         } catch (IOException e) {
@@ -478,16 +495,22 @@ public class Main {
     }
 
     /**
+     * Gets the path indicated by neighbourId, startNode and dbNeighbourNet. The method
+     * begins with neighbourId and ends when startNode ist reached.
      *
-     *
-     * @param dbNeighbourNet
-     * @param neighbourId
-     * @return
+     * @param dbNeighbourNet HashMap that contains the path info. Every key-value-pair is a node pointing to the next one.
+     * @param neighbourId Node to begin with
+     * @param startNode Node to finish path at
+     * @return the path
      */
     private static DBPath getPath(HashMap<Long, Long> dbNeighbourNet, Long neighbourId, DBNode startNode) {
         LinkedList<Long> dbPath = new LinkedList<>();
         double dbPathLength = 0;
+        int countOfBranches = 0;
 
+        if (Objects.equals(dbNodes.get(neighbourId).type, "simple_switch")
+                || Objects.equals(dbNodes.get(neighbourId).type, "cross"))
+            countOfBranches++;
         dbPath.add(neighbourId);
         Long tempId = neighbourId;
         while (tempId != startNode.nodeId) {
@@ -500,10 +523,13 @@ public class Main {
                         dbPathLength += Math.abs(dbNodes.get(nodeOneVariation).km - dbNodes.get(nodeTwoVariation).km);
                 }
             }
+            if (Objects.equals(dbNodes.get(dbNeighbourNet.get(tempId)).type, "simple_switch")
+                    || Objects.equals(dbNodes.get(dbNeighbourNet.get(tempId)).type, "cross"))
+                countOfBranches++;
             dbPath.add(dbNeighbourNet.get(tempId));
             tempId = dbNeighbourNet.get(tempId);
         }
-        return new DBPath(dbPath, dbPathLength);
+        return new DBPath(dbPath, dbPathLength, countOfBranches);
     }
 
     /**
@@ -511,10 +537,10 @@ public class Main {
      *
      * @param middleNode beginning of the path
      * @param secondPathNode first step on the path
-     * @param nodeToAvoid never the end of the path
+     * @param nodesToAvoid never a part of the path
      * @return a path from middleNode to any anchor node except nodeToAvoid
      */
-    private static DBPath getDBPathToAnchorNode(DBNode middleNode, DBNode secondPathNode, Long nodeToAvoid) {
+    private static DBPath getDBPathToAnchorNode(DBNode middleNode, DBNode secondPathNode, HashSet<Long> nodesToAvoid) {
         HashMap<Long, Long> visitedNodes = new HashMap<>();
         visitedNodes.put(middleNode.elementId, 0L);
         HashMap<Long, Long> dbNeighbourNet = new HashMap<>();
@@ -526,7 +552,7 @@ public class Main {
             nodesToCheck = (ArrayList<Long>) updatedNodesToCheck.clone();
             updatedNodesToCheck = new ArrayList<>();
             for (Long l : nodesToCheck) {
-                if (anchorNodes.get(l) != null && !Objects.equals(l, nodeToAvoid)) {
+                if (anchorNodes.get(l) != null && !nodesToAvoid.contains(l)) {
                     //get path from middleNode to found anchorNode
 
                     DBPath p = getPath(dbNeighbourNet, l, middleNode);
@@ -542,7 +568,7 @@ public class Main {
                 }
             }
         }
-        return new DBPath(new LinkedList<>(), 0);
+        return new DBPath(new LinkedList<>(), 0, 0);
     }
 
     /**
@@ -553,7 +579,7 @@ public class Main {
      * @param dbPath path taken in mapNodes()
      * @param dbPathLength length of the path taken in mapNodes()
      */
-    private static void mapPath(DBNode startNode, DBNode endNode, List<Long> dbPath, double dbPathLength, DBNode middleNode) {
+    private static void mapPath(DBNode startNode, DBNode endNode, List<Long> dbPath, double dbPathLength, DBNode middleNode, int countOfDbBranches, boolean rigorousExtension) {
         ArrayList<DBNode> showDBPath = new ArrayList<>();
         for (Long dbNodeShow : dbPath)
             showDBPath.add(dbNodes.get(dbNodeShow));
@@ -562,16 +588,8 @@ public class Main {
         //get related osmPath
         OSMNode osmStartNode = osmNodes.get(openAnchorNodes.get(startNode.nodeId));
         OSMNode osmEndNode = osmNodes.get(anchorNodes.get(endNode.nodeId));
-        try {
-            writer.write("DB-StartNode: " + startNode + "\n");
-            writer.write("DB-EndNode: " + endNode + "\n");
-            writer.write("OSM-StartNode: " + osmStartNode + "\n");
-            writer.write("OSM-EndNode: " + osmEndNode + "\n");
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
 
-        OSMPath osmPathObject = getOsmPathBetween(osmStartNode, osmEndNode, dbPathLength);
+        OSMPath osmPathObject = getOsmPathBetween(osmStartNode, osmEndNode, dbPath, dbPathLength, countOfDbBranches);
         double osmPathLength = osmPathObject.length;
         ArrayList<Long> osmPath = osmPathObject.nodes;
 
@@ -583,6 +601,19 @@ public class Main {
             middleNode.lat = -2;
             middleNode.lon = -2;
             return;
+        }
+
+        try {
+            writer.write("OSM-StartNode: " + osmStartNode + "\n");
+            writer.write("OSM-EndNode: " + osmEndNode + "\n");
+            writer.write("Laenge des OSM-Pfades: " + osmPathLength + "\n");
+            for (Long l : osmPath)
+                writer.write(osmNodes.get(l) + "\n");
+            writer.write("DB-StartNode: " + startNode + "\n");
+            writer.write("DB-EndNode: " + endNode + "\n");
+            writer.write("Laenge des DB-Pfades: " + dbPathLength + "\n");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
         //map nodes in paths
@@ -612,7 +643,7 @@ public class Main {
                 dbNodes.put(nextDbNode.nodeId, nextDbNode);
                 if (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross")) {
                     if (nextDbNode.lat < 0)
-                        if (mapBestOsmNodeFit(nextDbNode, nodeBefore, osmPath))
+                        if (mapBestOsmNodeFit(nextDbNode, nodeBefore, osmPath, rigorousExtension))
                             break;
                 }
                 continue;
@@ -643,7 +674,7 @@ public class Main {
             //if switch or cross -> add to anchorNodes
             //breaks DB-Path-loop
             if (Objects.equals(nextDbNode.type, "simple_switch") || Objects.equals(nextDbNode.type, "cross")) {
-                if (mapBestOsmNodeFit(nextDbNode, nodeBefore, osmPath))
+                if (mapBestOsmNodeFit(nextDbNode, nodeBefore, osmPath, rigorousExtension))
                     break;
             }
             //get gps-tag for dbNode
@@ -659,14 +690,17 @@ public class Main {
      * @param dbPathLength wanted length of the path to find
      * @return a path through the OSM railway map
      */
-    private static OSMPath getOsmPathBetween(OSMNode osmStartNode, OSMNode osmEndNode, double dbPathLength) {
-        OSMPath osmPath = new OSMPath(new ArrayList<>(), 0.0);
+    private static OSMPath getOsmPathBetween(OSMNode osmStartNode, OSMNode osmEndNode, List<Long> dbPath, double dbPathLength, int countOfDbBranches) {
+        OSMPath osmPath = new OSMPath(new ArrayList<>(), 0.0, 0);
         double bestPathLengthDif = Double.MAX_VALUE;
 
         ArrayList<OSMPath> newPotentialPaths = new ArrayList<>();
         ArrayList<OSMPath> potentialPaths;
         for (Long l : osmStartNode.neighbours) {
-            newPotentialPaths.add(new OSMPath(new ArrayList<>(List.of(osmStartNode.osmId, l)), getDistance(osmStartNode.lat, osmStartNode.lon, osmNodes.get(l).lat, osmNodes.get(l).lon) * 1000.0));
+            int cob = 1;
+            if (osmNodes.get(l).tags.containsValue("railway_crossing") || osmNodes.get(l).tags.containsValue("switch"))
+                cob++;
+            newPotentialPaths.add(new OSMPath(new ArrayList<>(List.of(osmStartNode.osmId, l)), getDistance(osmStartNode.lat, osmStartNode.lon, osmNodes.get(l).lat, osmNodes.get(l).lon) * 1000.0, cob));
         }
 
         while (!newPotentialPaths.isEmpty()) {
@@ -676,17 +710,24 @@ public class Main {
             for (OSMPath path : potentialPaths) {
                 OSMNode lastNode = osmNodes.get(path.nodes.get(path.nodes.size() - 1));
                 for (Long nId : lastNode.neighbours) {
-                    if (path.nodes.contains(nId) || Math.abs(path.length - dbPathLength) > bestPathLengthDif)
-                        continue;
-                    ArrayList<Long> nodes = path.nodes;
-                    nodes.add(nId);
-                    newPotentialPaths.add(new OSMPath(nodes, path.length + getDistance(lastNode.lat, lastNode.lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0));
-                    if (nId == osmEndNode.osmId) {
+                    if (lastNode.tags.containsValue("railway_crossing") || lastNode.tags.containsValue("switch"))
+                        path.countOfBranches++;
+                    if (lastNode.osmId == osmEndNode.osmId) {
                         if (Math.abs(path.length - dbPathLength) < bestPathLengthDif) {
                             bestPathLengthDif = Math.abs(path.length - dbPathLength);
-                            osmPath = path;
+                            osmPath = new OSMPath(new ArrayList<>(path.nodes), path.length, path.countOfBranches);
                         }
+                        continue;
                     }
+                    if (path.nodes.contains(nId) || Math.abs(path.length - dbPathLength) > bestPathLengthDif || path.countOfBranches > countOfDbBranches + 5 || path.length > dbPathLength * 1.1 + 50)
+                        continue;
+                    if (osmNodes.get(nId).tags.containsValue("switch") && osmNodes.get(nId).tags.containsKey("ref")
+                            && dbPath.stream().noneMatch(x -> Objects.equals(dbNodes.get(x).name1, osmNodes.get(nId).tags.get("ref"))
+                                                            || Objects.equals(dbNodes.get(x).name2, osmNodes.get(nId).tags.get("ref"))))
+                        continue;
+                    ArrayList<Long> nodes = new ArrayList<>(path.nodes);
+                    nodes.add(nId);
+                    newPotentialPaths.add(new OSMPath(nodes, path.length + getDistance(lastNode.lat, lastNode.lon, osmNodes.get(nId).lat, osmNodes.get(nId).lon) * 1000.0, 0 + path.countOfBranches));
                 }
             }
         }
@@ -700,7 +741,7 @@ public class Main {
      * @param osmNode OSM-switch/cross
      * @param osmPath OSM-path containing osmNode and fitting the DB-path containing dbNode
      */
-    private static boolean mapBestOsmNodeFit(DBNode dbNode, OSMNode osmNode, ArrayList<Long> osmPath) {
+    private static boolean mapBestOsmNodeFit(DBNode dbNode, OSMNode osmNode, ArrayList<Long> osmPath, boolean rigorousExtension) {
         long bestOsmNodeFit = 0L;
         int j = 1;
         int k = 1;
@@ -714,9 +755,14 @@ public class Main {
                     || (Objects.equals(dbNode.type, "cross") && osmNodes.get(currentOsmNode).tags.containsValue("railway_crossing"))) {
                 if (osmNodes.get(currentOsmNode).tags.containsKey("ref")) {
                     if (Objects.equals(osmNodes.get(currentOsmNode).tags.get("ref"), dbNode.name1) || Objects.equals(osmNodes.get(currentOsmNode).tags.get("ref"), dbNode.name2)) {
-                        bestOsmNodeFit = osmNodes.get(currentOsmNode).osmId;
+                        bestOsmNodeFit = currentOsmNode;
                         break;
                     }
+                }
+                //für rigoroses Erweitern der Ankerknoten
+                else {
+                    if (rigorousExtension)
+                        bestOsmNodeFit = currentOsmNode;
                 }
             }
         }
@@ -799,7 +845,7 @@ public class Main {
         }
 
         try {
-            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("data/DC"));
+            DirectoryStream<Path> ds = Files.newDirectoryStream(Paths.get("data/DB"));
             for (Path filePath : ds) {
                 int streckenId = Integer.parseInt(filePath.toString().substring(8, 12));
 
